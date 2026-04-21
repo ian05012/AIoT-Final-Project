@@ -1,0 +1,49 @@
+Abstract 摘要
+A. Attention Getter / Motivation 動機與引題
+B. But (However) 問題與挑戰
+C. Cure 解法提出
+D. Development 方法設計
+E. Experiments 實驗設計
+F. Findings 結果發現
+
+Introduction 緒論
+G. General 背景現況
+H. However 問題延伸
+I. In Literature 文獻回顧
+J. Judgement 文獻評析
+K. Keypoint 研究重點與貢獻
+L. List the Organization 論文架構
+
+Related Work 相關研究
+M. Methods 方法分類
+N. New Proposed 創新方法
+O. Organize 整理與比較
+
+Proposed Scheme (From PA to PM) 方法架構
+P. PA = Aim / Statement 研究目標
+PB. Based on / Background / Benefit 研究背景與依據
+PC. Cure / Cause 解法與原因
+PD. Design 架構設計
+PE. Paper Element 組成元素
+PF. Formulation / Foundation 理論基礎
+PG. Graph 架構圖
+PH. How 方法說明
+PI. Implementation / Interaction 實作流程
+PJ. Jump to Example 範例說明
+PK. Key Points Contribution 貢獻重點
+PL. Later Simulation 模擬規劃
+PM. Math Proof 數學證明
+
+Simulation 模擬與實驗
+Q. Quality and Quantity 評估指標
+R. Related Methods to Compare 比較方法
+S. Simulation Setup 實驗設定
+T. Tuning 參數調整
+U. Useful Results 有效結果
+V. Verify 驗證方法
+
+Conclusion 結論
+W. What Proposed 回顧研究
+X. eXcel 方法優勢
+Y. Yields 結果總結
+Z. Zen 結論與未來工作

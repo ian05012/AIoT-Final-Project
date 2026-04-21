@@ -1,0 +1,12 @@
+繳交
+# Part A. github with ppt cover the following section:
+(利用學術論文A-Z架構)
+0. Abstract
+1. Introduction
+2. Related Work/ NotebookLM
+3. Proposed Design/規格書 
+===============
+# Part B: 10 min recording on youtube 
+
+===提示詞====
+官方 正式
