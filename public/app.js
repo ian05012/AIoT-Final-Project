@@ -1,7 +1,7 @@
 // WebSocket 連線管理
 let socket = null;
-const WS_URL = window.location.hostname.includes("localtunnel.me")
-    ? `wss://aiot-ws-ian05012.localtunnel.me`
+const WS_URL = window.location.hostname.includes("serveo.net")
+    ? `wss://aiot-ws-ian05012.serveo.net`
     : `ws://${window.location.hostname || "localhost"}:3000`;
 const reconnectInterval = 3000;
 
