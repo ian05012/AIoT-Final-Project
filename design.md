@@ -6,7 +6,7 @@
 
 **Goals:**
 - 實現硬體端（微控制器）與電腦端（Godot 應用程式）之間穩定、低延遲的區域網路資料通訊。
-- 準確擷取各項感測器資料（Load Cell 測重、超音波距離、CO2 濃度），並建立有效的資料過濾機制。
+- 準確擷取各項感測器資料（Load Cell 測重、超音波距離、粉塵濃度），並建立有效的資料過濾機制。
 - 開發具備「滑鼠穿透」及「背景透明」特性的桌面虛擬角色應用程式，確保不干擾使用者日常工作。
 - 實作基於狀態機（State Machine）的角色動畫切換邏輯，將健康數據即時映射至視覺回饋。
 
@@ -18,7 +18,7 @@
 ## Decisions
 
 1. **硬體核心選擇 ESP32 晶片**
-   - **Rationale**: ESP32 內建 Wi-Fi 模組，原生支援物聯網開發；且具備多組 I/O 腳位與足夠的運算能力，能同時處理測重模組、IMU、超音波與 CO2 感測器的讀取及初步濾波。
+   - **Rationale**: ESP32 內建 Wi-Fi 模組，原生支援物聯網開發；且具備多組 I/O 腳位與足夠的運算能力，能同時處理測重模組、超音波與粉塵感測器的讀取及初步濾波。
 
 2. **通訊協定採用 WebSocket 或輕量化 MQTT**
    - **Rationale**: 為了實現感測數據即時連動角色動畫，需要低延遲推播機制。若專注於單機環境，可直接在 ESP32 建立 WebSocket Server；若考慮擴充性，則可引入輕量 MQTT Broker。這兩者皆優於傳統的 HTTP Polling。
@@ -65,8 +65,8 @@ stateDiagram-v2
     }
 
     state AIR_WARNING {
-        [*] --> AirPoor : 空氣悶熱 (粉紫色, 微微抖動, 輕微毒泡)
-        AirPoor --> AirDangerous : 空氣窒息 (深毒紫色, 劇烈抖動, 毒霧, X X 眼)
+        [*] --> AirPoor : 粉塵偏高 (粉紫色, 微微抖動, 輕微毒泡)
+        AirPoor --> AirDangerous : 粉塵危害 (深毒紫色, 劇烈抖動, 毒霧, X X 眼)
     }
 
     state DEHYDRATION_WARNING {
@@ -81,23 +81,23 @@ stateDiagram-v2
 
     %% 轉移條件
     IDLE --> POSTURE_WARNING : 距離 < 35cm
-    IDLE --> AIR_WARNING : CO2 >= 1000 ppm
+    IDLE --> AIR_WARNING : PM2.5 >= 35 μg/m³
     IDLE --> DEHYDRATION_WARNING : 久未飲水 >= 60 分鐘
     IDLE --> SEDENTARY_WARNING : 久坐時間 >= 60 分鐘
  
     POSTURE_WARNING --> IDLE : 恢復正常距離
-    AIR_WARNING --> IDLE : CO2 < 1000 ppm
+    AIR_WARNING --> IDLE : PM2.5 < 35 μg/m³
     DEHYDRATION_WARNING --> IDLE : 喝水補水完成
     SEDENTARY_WARNING --> IDLE : 站立重設時間
 ```
 
 ### 多重狀態疊加優先權 (Priority Order)
 當使用者同時觸發多重不良健康狀態時，虛擬角色會依據以下優先權進行視覺外觀融合與主題顯示：
-1. **窒息 (Air Stage 2)** - CO2 >= 2000 ppm (優先度最高，最緊急)
+1. **粉塵危害 (Air Stage 2)** - PM2.5 >= 75 μg/m³ (優先度最高，最緊急)
 2. **嚴重脫水 (Dehydration Stage 2)** - 久未飲水 >= 120 分鐘
 3. **距離太近 (Posture Stage 2)** - 距離 < 25cm
 4. **嚴重久坐 (Sedentary Stage 2)** - 久坐 >= 120 分鐘
-5. **悶熱 (Air Stage 1)** - CO2 >= 1000 ppm
+5. **粉塵偏高 (Air Stage 1)** - PM2.5 >= 35 μg/m³
 6. **輕度脫水 (Dehydration Stage 1)** - 久未飲水 >= 60 分鐘
 7. **距離較近 (Posture Stage 1)** - 距離 < 35cm
 8. **輕微久坐 (Sedentary Stage 1)** - 久坐 >= 60 分鐘

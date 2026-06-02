@@ -7,7 +7,7 @@ const reconnectInterval = 3000;
 const state = {
     weight: 350,       // 水杯重量 (g)
     distance: 60,      // 超音波距離 (cm)
-    co2: 450,          // 二氧化碳濃度 (ppm)
+    pm25: 15,          // PM2.5 粉塵濃度 (μg/m³)
     time: 0,           // 久坐時間 (分鐘)
     noWaterTime: 0,    // 久未飲水時間 (分鐘)
     
@@ -365,8 +365,8 @@ const elSliderWeight = document.getElementById("slider-weight");
 const elValWeight = document.getElementById("val-weight");
 const elSliderDistance = document.getElementById("slider-distance");
 const elValDistance = document.getElementById("val-distance");
-const elSliderCO2 = document.getElementById("slider-co2");
-const elValCO2 = document.getElementById("val-co2");
+const elSliderPM25 = document.getElementById("slider-pm25");
+const elValPM25 = document.getElementById("val-pm25");
 const elSliderTime = document.getElementById("slider-time");
 const elValTime = document.getElementById("val-time");
 const elSliderNoWater = document.getElementById("slider-no-water");
@@ -377,7 +377,7 @@ const elBtnRefill = document.getElementById("btn-refill");
 const elBtnDry = document.getElementById("btn-dry");
 const elBtnSlouch = document.getElementById("btn-slouch");
 const elBtnGoodPosture = document.getElementById("btn-good-posture");
-const elBtnHighCO2 = document.getElementById("btn-high-co2");
+const elBtnHighPM25 = document.getElementById("btn-high-pm25");
 const elBtnSedentary = document.getElementById("btn-sedentary");
 const elBtnResetTimer = document.getElementById("btn-reset-timer");
 
@@ -449,8 +449,7 @@ function connectWebSocket() {
 function updateStateFromPacket(packet) {
     state.weight = packet.sensors.weight;
     state.distance = packet.sensors.distance;
-    state.angle = packet.sensors.angle;
-    state.co2 = packet.sensors.co2;
+    state.pm25 = packet.sensors.pm25;
     state.time = packet.status.sedentary_minutes;
     if (packet.status.no_water_minutes !== undefined) {
         state.noWaterTime = packet.status.no_water_minutes;
@@ -460,8 +459,8 @@ function updateStateFromPacket(packet) {
     elValWeight.innerText = `${state.weight}g`;
     elSliderDistance.value = state.distance;
     elValDistance.innerText = `${state.distance}cm`;
-    elSliderCO2.value = state.co2;
-    elValCO2.innerText = `${state.co2} ppm`;
+    elSliderPM25.value = state.pm25;
+    elValPM25.innerText = `${state.pm25} μg/m³`;
     elSliderTime.value = state.time;
     elValTime.innerText = `${state.time} min`;
     elSliderNoWater.value = state.noWaterTime;
@@ -528,23 +527,23 @@ function processThresholds() {
         elMetricPosture.innerText = "GOOD (端正)";
     }
 
-    // 3. 空氣品質判定 (階段性)
-    state.isSuffocating = (state.co2 >= 2000);
+    // 3. 空氣品質判定 (PM2.5 粉塵，階段性)
+    state.isSuffocating = (state.pm25 >= 75);
     if (state.isSuffocating) {
         state.airStage = 2;
         elAirPoison.style.backgroundColor = "rgba(162, 61, 255, 0.25)"; // 毒紫色霧霾
         document.getElementById("card-air").className = "metric-card alert";
-        elMetricAir.innerText = "DANGEROUS (窒息)";
-    } else if (state.co2 >= 1000) {
+        elMetricAir.innerText = "DANGEROUS (紫爆危害)";
+    } else if (state.pm25 >= 35) {
         state.airStage = 1;
         elAirPoison.style.backgroundColor = "rgba(162, 61, 255, 0.1)"; // 微紫色
         document.getElementById("card-air").className = "metric-card alert";
-        elMetricAir.innerText = "POOR (悶熱)";
+        elMetricAir.innerText = "POOR (橘警偏高)";
     } else {
         state.airStage = 0;
         elAirPoison.style.backgroundColor = "rgba(162, 61, 255, 0)";
         document.getElementById("card-air").className = "metric-card good";
-        elMetricAir.innerText = "EXCELLENT (極佳)";
+        elMetricAir.innerText = "EXCELLENT (良好)";
     }
 
     // 4. 久坐判定 (階段性)
@@ -633,12 +632,12 @@ function sendPacket() {
             sensors: {
                 weight: parseInt(state.weight),
                 distance: parseInt(state.distance),
-                co2: parseInt(state.co2)
+                pm25: parseInt(state.pm25)
             },
             status: {
                 is_drinking: state.isDrinking,
                 posture: state.isSlouched ? "slouched" : "good",
-                air_quality: state.isSuffocating ? "danger" : (state.co2 >= 1000 ? "poor" : "excellent"),
+                air_quality: state.isSuffocating ? "danger" : (state.pm25 >= 35 ? "poor" : "excellent"),
                 sedentary_minutes: parseInt(state.time),
                 no_water_minutes: parseInt(state.noWaterTime),
                 posture_stage: state.postureStage,
@@ -683,9 +682,9 @@ elSliderDistance.addEventListener("input", (e) => {
     sendPacket();
 });
 
-elSliderCO2.addEventListener("input", (e) => {
-    state.co2 = parseInt(e.target.value);
-    elValCO2.innerText = `${state.co2} ppm`;
+elSliderPM25.addEventListener("input", (e) => {
+    state.pm25 = parseInt(e.target.value);
+    elValPM25.innerText = `${state.pm25} μg/m³`;
     processThresholds();
     sendPacket();
 });
@@ -750,10 +749,10 @@ elBtnGoodPosture.addEventListener("click", () => {
     sendPacket();
 });
 
-elBtnHighCO2.addEventListener("click", () => {
-    elSliderCO2.value = 2800;
-    state.co2 = 2800;
-    elValCO2.innerText = "2800 ppm";
+elBtnHighPM25.addEventListener("click", () => {
+    elSliderPM25.value = 150;
+    state.pm25 = 150;
+    elValPM25.innerText = "150 μg/m³";
     
     processThresholds();
     sendPacket();

@@ -85,18 +85,18 @@
                 <!-- 空氣品質 -->
                 <div class="control-group" id="group-air">
                     <div class="group-header">
-                        <h3>🍃 空氣品質 (CO2 Sensor)</h3>
-                        <span class="value-badge" id="val-co2">450 ppm</span>
+                        <h3>🍃 空氣品質 (GP2Y1010AU0F PM2.5)</h3>
+                        <span class="value-badge" id="val-pm25">15 μg/m³</span>
                     </div>
                     <div class="range-container">
-                        <input type="range" id="slider-co2" min="400" max="5000" value="450" step="50">
+                        <input type="range" id="slider-pm25" min="0" max="250" value="15" step="1">
                         <div class="range-labels">
-                            <span>新鮮 (400)</span>
-                            <span>缺氧危險 (5000)</span>
+                            <span>良好 (0 μg/m³)</span>
+                            <span>危害 (250 μg/m³)</span>
                         </div>
                     </div>
                     <div class="btn-row">
-                        <button class="pixel-btn danger-trigger-btn" id="btn-high-co2">💨 模擬室內缺氧 (2500 ppm)</button>
+                        <button class="pixel-btn danger-trigger-btn" id="btn-high-pm25">💨 模擬粉塵紫爆 (150 μg/m³)</button>
                     </div>
                 </div>
 
