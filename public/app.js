@@ -1,6 +1,8 @@
 // WebSocket 連線管理
 let socket = null;
-const WS_URL = `ws://${window.location.hostname || "localhost"}:3000`;
+const WS_URL = window.location.hostname.includes("localtunnel.me")
+    ? `wss://aiot-ws-ian05012.localtunnel.me`
+    : `ws://${window.location.hostname || "localhost"}:3000`;
 const reconnectInterval = 3000;
 
 // 感測器狀態數據 (預設正常值)
