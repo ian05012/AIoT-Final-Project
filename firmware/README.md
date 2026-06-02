@@ -21,6 +21,24 @@
 
 ---
 
+## 🚀 無法直接對接時的解決方案：USB 串口中繼機制 (PC-Relay Mode)
+
+如果您的 **Arduino Nano 與 GP2Y1010AU0F 已經固定或黏死在方盒內部**，導致無法拉杜邦線與 ESP32 連接，您**完全不需要強行拆卸硬體**！
+
+我們已經在 PC 端的 WebSocket 伺服器（`server.py`）中加入了 **USB 串口掃描與中繼機制**。
+
+### 🔌 PC-Relay 運作機制與接線
+1. **Arduino Nano 盒**：使用 Nano 內建的 USB 傳輸線，直接插入 **PC 的 USB 槽**。這既能供電，也能將 PM2.5 資料透過 USB 的 COM Port 送給 PC。
+2. **ESP32 主控**：將 HC-SR04、HX711 與無源蜂鳴器接在 ESP32 上，並以 Wi-Fi 將距離與重量發給 PC。
+3. **PC 伺服器 (server.py)**：
+   * 在背景啟動 Serial 監聽（需 `pip install pyserial`），會**自動掃描並連線**至您的 Arduino Nano USB 串口。
+   * 從串口讀取 PM2.5 值後，PC 伺服器會自動將資料轉化為 WebSocket 廣播封包發送。
+   * ESP32 主控會經由 WebSocket 收到這個廣播值（與久坐/缺水指標一同接收），並在本地觸發無源蜂鳴器鳴叫。
+   
+> **如此一來，兩塊開發板不需要接任何一條實體線，即可完美透過 PC 端的 WebSocket 伺服器完成無線資料整合與實體蜂鳴器警報！**
+
+---
+
 ## 🔌 電路接線圖 (Wiring Schema)
 
 > [!WARNING]
