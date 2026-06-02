@@ -152,6 +152,13 @@
                         </div>
                     </div>
 
+                    <!-- 蜂鳴器控制與狀態 -->
+                    <div class="stat-row" style="margin-top: 5px; margin-bottom: 5px; flex-wrap: wrap; gap: 10px; align-items: center;">
+                        <div class="stat-label">BUZZER (蜂鳴器):</div>
+                        <button class="pixel-btn tiny secondary" id="btn-toggle-buzzer" style="font-family: 'Press Start 2P', monospace; font-size: 0.55rem; padding: 6px 10px;">🔇 BUZZER MUTED</button>
+                        <span id="buzzer-status-indicator" style="font-family: 'Press Start 2P', monospace; font-size: 0.55rem; color: var(--color-text-dim); background: #000; padding: 4px 8px; border: 2px solid #2d2d2d;">OFF</span>
+                    </div>
+
                     <!-- 各項健康指標卡片 -->
                     <div class="metrics-grid">
                         <div class="metric-card" id="card-hydration">

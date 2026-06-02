@@ -32,7 +32,11 @@ const state = {
     isMouseHovering: false,  // 滑鼠是否懸停在史萊姆身上
     actionState: "IDLE",     // 目前主要顯示的行為
     todayWater: 0,     // 今日飲水量 (ml)
-    prevWeight: 350    // 上次重量 (用來偵測喝水)
+    prevWeight: 350,   // 上次重量 (用來偵測喝水)
+    
+    // 蜂鳴器相關狀態
+    buzzerMuted: true,        // 是否靜音 (預設靜音)
+    activeWarningCount: 0     // 當前健康警告的個數
 };
 
 // 史萊姆座標與隨機跳動狀態
@@ -391,6 +395,8 @@ const elMetricAction = document.getElementById("metric-action");
 const elAirPoison = document.getElementById("air-poison");
 const elConsoleLog = document.getElementById("console-log");
 const elBtnClearConsole = document.getElementById("btn-clear-console");
+const elBtnToggleBuzzer = document.getElementById("btn-toggle-buzzer");
+const elBuzzerStatusIndicator = document.getElementById("buzzer-status-indicator");
 
 // 建立心形血量條
 function updateHeartsUI() {
@@ -406,6 +412,107 @@ function updateHeartsUI() {
             heartSpan.innerText = "🖤";
         }
         elHeartsContainer.appendChild(heartSpan);
+    }
+}
+
+// Web Audio API 蜂鳴器控制
+let audioCtx = null;
+let buzzerIntervalId = null;
+let currentBuzzerInterval = null;
+let currentBuzzerFreq = null;
+
+function playBeep(freq, durationMs) {
+    if (state.buzzerMuted) return;
+    try {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+        
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        
+        const now = audioCtx.currentTime;
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(0.15, now + 0.01);
+        gainNode.gain.setValueAtTime(0.15, now + (durationMs / 1000) - 0.01);
+        gainNode.gain.linearRampToValueAtTime(0, now + (durationMs / 1000));
+        
+        osc.start(now);
+        osc.stop(now + (durationMs / 1000));
+    } catch (err) {
+        console.error("Audio beep error:", err);
+    }
+}
+
+function updateBuzzer() {
+    // 如果靜音，或者沒有警告，則停止鳴叫
+    if (state.buzzerMuted || state.activeWarningCount === 0) {
+        if (buzzerIntervalId) {
+            clearInterval(buzzerIntervalId);
+            buzzerIntervalId = null;
+        }
+        currentBuzzerInterval = null;
+        currentBuzzerFreq = null;
+        
+        if (elBuzzerStatusIndicator) {
+            elBuzzerStatusIndicator.innerText = state.buzzerMuted ? "MUTED" : "OFF";
+            elBuzzerStatusIndicator.style.color = "var(--color-text-dim)";
+        }
+        return;
+    }
+    
+    // 根據警告個數決定頻率 (Pitch) 與間隔 (Beep Interval)
+    let freq = 440;
+    let interval = 2000;
+    let desc = "輕度";
+    
+    if (state.activeWarningCount === 1) {
+        freq = 440;
+        interval = 2000;
+        desc = "輕度";
+    } else if (state.activeWarningCount === 2) {
+        freq = 660;
+        interval = 1000;
+        desc = "中度";
+    } else if (state.activeWarningCount === 3) {
+        freq = 880;
+        interval = 500;
+        desc = "強烈";
+    } else if (state.activeWarningCount >= 4) {
+        freq = 1200;
+        interval = 250;
+        desc = "緊急";
+    }
+    
+    if (elBuzzerStatusIndicator) {
+        elBuzzerStatusIndicator.innerText = `${desc} (${freq}Hz | ${interval/1000}s)`;
+        elBuzzerStatusIndicator.style.color = "var(--color-gold)";
+    }
+    
+    // 如果頻率或間隔改變了，或者計時器尚未啟動，則重新啟動
+    if (buzzerIntervalId === null || currentBuzzerInterval !== interval || currentBuzzerFreq !== freq) {
+        if (buzzerIntervalId) {
+            clearInterval(buzzerIntervalId);
+        }
+        
+        currentBuzzerInterval = interval;
+        currentBuzzerFreq = freq;
+        
+        // 立即發聲一次
+        playBeep(freq, 100);
+        
+        buzzerIntervalId = setInterval(() => {
+            playBeep(freq, 100);
+        }, interval);
     }
 }
 
@@ -602,6 +709,17 @@ function processThresholds() {
     elMetricWater.innerText = `${state.todayWater} / 2000 ml`;
     elMetricAction.innerText = state.actionState;
     updateHeartsUI();
+
+    // 7. 計算當前觸發警告的項目總數 (Stage >= 1)
+    let warnings = 0;
+    if (state.postureStage > 0) warnings++;
+    if (state.airStage > 0) warnings++;
+    if (state.sedentaryStage > 0) warnings++;
+    if (state.dehydrationStage > 0) warnings++;
+    state.activeWarningCount = warnings;
+
+    // 8. 更新蜂鳴器發聲邏輯
+    updateBuzzer();
 }
 
 // 定時健康值扣減與模擬器演化 (每 2.5 秒進行一次判定)
@@ -665,6 +783,33 @@ function logConsole(source, text, direction) {
 // 清除日誌
 elBtnClearConsole.addEventListener("click", () => {
     elConsoleLog.innerHTML = "";
+});
+
+// 蜂鳴器開關切換
+elBtnToggleBuzzer.addEventListener("click", () => {
+    state.buzzerMuted = !state.buzzerMuted;
+    
+    // 試圖喚醒 Web Audio API
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+    
+    if (state.buzzerMuted) {
+        elBtnToggleBuzzer.className = "pixel-btn tiny secondary";
+        elBtnToggleBuzzer.innerText = "🔇 BUZZER MUTED";
+        logConsole("BUZZER", "已將蜂鳴器靜音", "outbound");
+    } else {
+        elBtnToggleBuzzer.className = "pixel-btn tiny alert-trigger-btn";
+        elBtnToggleBuzzer.innerText = "🔊 BUZZER ENABLED";
+        logConsole("BUZZER", "已啟用蜂鳴器聲音", "outbound");
+        // 點選啟用時播放確認音 (C5)
+        playBeep(523.25, 100);
+    }
+    
+    updateBuzzer();
 });
 
 // --- 控制項事件監聽 ---
