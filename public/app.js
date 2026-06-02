@@ -902,8 +902,8 @@ function drawSlime() {
             } else if (targetFood && slimePos.squashCount === 0) {
                 // 水果餵食覓食 AI 跳躍
                 const dxToFood = Math.abs(slimePos.x - targetFood.x);
-                // 增加判定距離至 65 像素，確保身體任何部位碰到就吃得到
-                if (dxToFood < 65) {
+                // 增加判定距離至 90 像素，確保身體任何部位（包含邊緣與尾巴）碰到就吃得到
+                if (dxToFood < 90) {
                     // 吞食水果
                     targetFood.active = false;
                     state.isEating = true;
