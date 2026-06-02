@@ -1,8 +1,6 @@
 // WebSocket 連線管理
 let socket = null;
-const WS_URL = window.location.hostname.includes("serveo.net")
-    ? `wss://aiot-ws-ian05012.serveo.net`
-    : `ws://${window.location.hostname || "localhost"}:3000`;
+let WS_URL = '';
 const reconnectInterval = 3000;
 
 // 感測器狀態數據 (預設正常值)
@@ -1815,10 +1813,30 @@ canvas.addEventListener("mousedown", (e) => {
 });
 
 // --- 初始化流程 ---
+async function initWebSocket() {
+    if (window.location.hostname.includes("serveo.net")) {
+        try {
+            const response = await fetch('config.json');
+            const config = await response.json();
+            if (config && config.ws_url) {
+                WS_URL = config.ws_url;
+            } else {
+                WS_URL = `wss://aiot-ws-ian05012.serveo.net`;
+            }
+        } catch (e) {
+            console.error("無法取得 config.json，使用預設 WebSocket 網址", e);
+            WS_URL = `wss://aiot-ws-ian05012.serveo.net`;
+        }
+    } else {
+        WS_URL = `ws://${window.location.hostname || "localhost"}:3000`;
+    }
+    connectWebSocket();
+}
+
 window.addEventListener("load", () => {
     updateHeartsUI();
     processThresholds();
-    connectWebSocket();
+    initWebSocket();
     animate();
 
     // 綁定角色選擇按鈕點擊事件
