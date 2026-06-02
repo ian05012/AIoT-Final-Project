@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧物聯網健康輔助系統 - 虛擬 Demo 平台</title>
+    <!-- 引入 Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 頂部標頭 -->
+        <header class="app-header">
+            <div class="logo-area">
+                <span class="pixel-icon">🎮</span>
+                <h1>IoT HEALTH ASSISTANT</h1>
+                <span class="sub-title">果凍史萊姆 虛擬 Demo 平台</span>
+            </div>
+            <div class="connection-status" id="ws-status">
+                <span class="status-dot disconnected"></span>
+                <span class="status-text">WS DISCONNECTED</span>
+            </div>
+        </header>
+
+        <!-- 主要內容區 -->
+        <main class="app-content">
+            <!-- 左側：硬體模擬控制台 -->
+            <section class="control-panel panel">
+                <h2 class="section-title"><span class="brick"></span> SENSOR SIMULATOR</h2>
+                
+                <!-- 智慧杯墊 -->
+                <div class="control-group" id="group-weight">
+                    <div class="group-header">
+                        <h3>🥤 智慧杯墊 (Weight Sensor)</h3>
+                        <span class="value-badge" id="val-weight">350g</span>
+                    </div>
+                    <div class="range-container">
+                        <input type="range" id="slider-weight" min="0" max="1000" value="350" step="5">
+                        <div class="range-labels">
+                            <span>空杯 (0g)</span>
+                            <span>滿杯 (1000g)</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 模擬缺水控制 -->
+                    <div class="range-container" style="margin-top: 10px;">
+                        <label style="font-size: 0.9rem; color: var(--color-text-dim);">久未飲水時間: <span class="val-num" id="val-no-water">0 min</span></label>
+                        <input type="range" id="slider-no-water" min="0" max="180" value="0">
+                        <div class="range-labels">
+                            <span>0 分鐘</span>
+                            <span>180 分鐘</span>
+                        </div>
+                    </div>
+
+                    <div class="btn-row">
+                        <button class="pixel-btn" id="btn-drink">🥛 模擬喝水 (-250g)</button>
+                        <button class="pixel-btn secondary" id="btn-refill">💧 加滿水 (1000g)</button>
+                        <button class="pixel-btn warning-trigger-btn" id="btn-dry">⚠️ 模擬缺水 (90 min)</button>
+                    </div>
+                </div>
+
+                <!-- 坐姿距離監測 -->
+                <div class="control-group" id="group-posture">
+                    <div class="group-header">
+                        <h3>📏 坐姿距離監測 (Ultrasonic Sensor)</h3>
+                    </div>
+                    
+                    <div class="range-container">
+                        <label>超音波距離: <span class="val-num" id="val-distance">60cm</span></label>
+                        <input type="range" id="slider-distance" min="10" max="100" value="60">
+                        <div class="range-labels">
+                            <span>太近 (10cm)</span>
+                            <span>正常 (100cm)</span>
+                        </div>
+                    </div>
+                    <div class="btn-row" style="margin-top: 15px;">
+                        <button class="pixel-btn alert-trigger-btn" id="btn-slouch">🙇 模擬距離太近</button>
+                        <button class="pixel-btn secondary" id="btn-good-posture">🚶 恢復正常距離</button>
+                    </div>
+                </div>
+
+                <!-- 空氣品質 -->
+                <div class="control-group" id="group-air">
+                    <div class="group-header">
+                        <h3>🍃 空氣品質 (CO2 Sensor)</h3>
+                        <span class="value-badge" id="val-co2">450 ppm</span>
+                    </div>
+                    <div class="range-container">
+                        <input type="range" id="slider-co2" min="400" max="5000" value="450" step="50">
+                        <div class="range-labels">
+                            <span>新鮮 (400)</span>
+                            <span>缺氧危險 (5000)</span>
+                        </div>
+                    </div>
+                    <div class="btn-row">
+                        <button class="pixel-btn danger-trigger-btn" id="btn-high-co2">💨 模擬室內缺氧 (2500 ppm)</button>
+                    </div>
+                </div>
+
+                <!-- 久坐計時 -->
+                <div class="control-group" id="group-time">
+                    <div class="group-header">
+                        <h3>⏱️ 久坐時間 (Sedentary Timer)</h3>
+                        <span class="value-badge" id="val-time">0 min</span>
+                    </div>
+                    <div class="range-container">
+                        <input type="range" id="slider-time" min="0" max="180" value="0">
+                        <div class="range-labels">
+                            <span>0 分鐘</span>
+                            <span>180 分鐘</span>
+                        </div>
+                    </div>
+                    <div class="btn-row">
+                        <button class="pixel-btn warning-trigger-btn" id="btn-sedentary">🛌 模擬久坐 (75 min)</button>
+                        <button class="pixel-btn secondary" id="btn-reset-timer">🔄 重設時間</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 右側：果凍史萊姆角色與儀表板 -->
+            <section class="pet-panel panel">
+                <h2 class="section-title"><span class="brick redstone"></span> JELLY SLIME</h2>
+                
+                <!-- 角色選擇面板 -->
+                <div class="pet-selector-wrapper">
+                    <span class="selector-label">SELECT PET:</span>
+                    <div class="pet-selector">
+                        <button class="pixel-btn active" data-pet="slime">史萊姆 👾</button>
+                        <button class="pixel-btn" data-pet="cat">麻吉貓 🐱</button>
+                        <button class="pixel-btn" data-pet="ghost">小精靈 👻</button>
+                        <button class="pixel-btn" data-pet="chick">小黃雞 🐥</button>
+                        <button class="pixel-btn" data-pet="bubble">黑糖珍珠 🧋</button>
+                    </div>
+                </div>
+
+                <!-- 畫布區域 -->
+                <div class="canvas-container">
+                    <canvas id="steve-canvas" width="400" height="400"></canvas>
+                    <div class="air-poison-overlay" id="air-poison"></div>
+                </div>
+
+                <!-- 遊戲化儀表板 -->
+                <div class="dashboard">
+                    <!-- 心型血條 -->
+                    <div class="stat-row">
+                        <div class="stat-label">HEALTH (健康值):</div>
+                        <div class="stat-value hearts-container" id="hearts-container">
+                            <!-- JS 動態生成心形 -->
+                        </div>
+                    </div>
+
+                    <!-- 各項健康指標卡片 -->
+                    <div class="metrics-grid">
+                        <div class="metric-card" id="card-hydration">
+                            <span class="metric-icon">💧</span>
+                            <div class="metric-info">
+                                <span class="metric-title">今日飲水量</span>
+                                <span class="metric-val" id="metric-water">0 / 2000 ml</span>
+                            </div>
+                        </div>
+                        <div class="metric-card" id="card-posture">
+                            <span class="metric-icon">🧘</span>
+                            <div class="metric-info">
+                                <span class="metric-title">坐姿狀態</span>
+                                <span class="metric-val" id="metric-posture">GOOD</span>
+                            </div>
+                        </div>
+                        <div class="metric-card" id="card-air">
+                            <span class="metric-icon">🍃</span>
+                            <div class="metric-info">
+                                <span class="metric-title">空氣品質</span>
+                                <span class="metric-val" id="metric-air">EXCELLENT</span>
+                            </div>
+                        </div>
+                        <div class="metric-card" id="card-action">
+                            <span class="metric-icon">⚡</span>
+                            <div class="metric-info">
+                                <span class="metric-title">目前行為</span>
+                                <span class="metric-val" id="metric-action">IDLE</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+        
+        <!-- 底部資訊與封包記錄器 -->
+        <footer class="app-footer">
+            <div class="console-panel">
+                <div class="console-header">
+                    <h4>📡 Real-time JSON Packet Log (WebSocket Broadcast)</h4>
+                    <button class="pixel-btn tiny" id="btn-clear-console">Clear</button>
+                </div>
+                <div class="console-body" id="console-log">
+                    <!-- 封包記錄 -->
+                </div>
+            </div>
+        </footer>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
