@@ -3,6 +3,7 @@ extends Node2D
 # 狀態變數 (由 Network 節點同步)
 var health = 10.0
 var is_drinking = false
+var last_today_water = -1.0
 var is_eating = false
 var current_eat_color = Color("ff4f43")
 var is_happy = false
@@ -144,11 +145,17 @@ func _on_network_data(packet: Dictionary):
     is_tired = (sedentary_stage == 1)
     is_dehydrated = (dehydration_stage > 0)
     
-    var is_drinking_packet = status.get("is_drinking", false)
-    if is_drinking_packet and not is_drinking:
+    var today_water = float(status.get("today_water", 0.0))
+    if last_today_water == -1.0:
+        last_today_water = today_water
+    elif today_water > last_today_water:
+        last_today_water = today_water
         is_drinking = true
         is_happy = false
+        happy_timer.stop()
         drink_timer.start(2.5)
+    else:
+        last_today_water = today_water
 
 func _on_drink_timeout():
     is_drinking = false
@@ -164,13 +171,14 @@ func _on_happy_timeout():
     is_happy = false
 
 func _process(delta):
-    anim_time += delta * 60.0
+    var dt_factor = delta * 60.0
+    anim_time += dt_factor
     
     if poke_timer > 0:
-        poke_timer -= 1
+        poke_timer = max(0.0, poke_timer - dt_factor)
         
     if squash_count > 0:
-        squash_count -= 1
+        squash_count = max(0.0, squash_count - dt_factor)
         
     _update_movement(delta)
     queue_redraw()
@@ -179,19 +187,20 @@ func _update_movement(delta):
     var can_jump = (posture_stage == 0 and air_stage < 2 and sedentary_stage < 2)
     if can_jump:
         if is_jumping:
-            var progress_increment = 0.03
+            # 提高基礎跳躍速度並使其框架率無關，解決移動緩慢且卡頓的問題
+            var progress_increment = 0.05
             if poke_timer > 0:
-                progress_increment = 0.018
+                progress_increment = 0.035
             elif sedentary_stage == 1:
-                progress_increment = 0.015
+                progress_increment = 0.025
                 
-            jump_progress += progress_increment
+            jump_progress += progress_increment * delta * 60.0
             if jump_progress >= 1.0:
                 draw_x = target_x
                 draw_y = target_y
                 is_jumping = false
                 jump_progress = 0.0
-                squash_count = 24
+                squash_count = 24.0
                 jump_height = 60.0
             else:
                 draw_x = lerp(start_x, target_x, jump_progress)

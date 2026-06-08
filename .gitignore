@@ -1,0 +1,12 @@
+# Godot build artifacts
+*.exe
+*.pck
+*.console.exe
+.godot/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Log files
+*.log

@@ -1,0 +1,14 @@
+[gd_scene format=3 uid="uid://gned0fywww2p"]
+
+[ext_resource type="Script" uid="uid://bj7mh31ytkd0i" path="res://main.gd" id="1_h2yge"]
+[ext_resource type="Script" uid="uid://bkro0mtab1rsb" path="res://slime.gd" id="2_1bvp3"]
+[ext_resource type="Script" uid="uid://benlyqc001om" path="res://network.gd" id="3_lquwl"]
+
+[node name="Main" type="Node2D" unique_id=1399993575]
+script = ExtResource("1_h2yge")
+
+[node name="Slime" type="Node2D" parent="." unique_id=99606658]
+script = ExtResource("2_1bvp3")
+
+[node name="Network" type="Node" parent="." unique_id=1557881206]
+script = ExtResource("3_lquwl")

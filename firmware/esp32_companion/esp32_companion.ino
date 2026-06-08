@@ -1,32 +1,23 @@
 /**
- * 智慧物聯網健康輔助系統 - ESP32 主控板韌體 (直連感測器版)
+ * 智慧物聯網健康輔助系統 - ESP32 主控板韌體 (USB 序列埠直連版)
  * 
  * 功能：
- * 1. 連接 Wi-Fi 並作為 WebSocket 用戶端連線至電腦端的 server.py。
- * 2. 讀取 HX711 智慧杯墊重量 (5kg 壓力感測器)。
- * 3. 讀取 HC-SR04 超音波距離感測器。
- * 4. 直接驅動並讀取 GP2Y1010AU0F 光學粉塵感測器 (無需 Arduino Nano)。
- * 5. 依據異常健康狀況的數量，利用 PWM 動態控制無源蜂鳴器的音高與鳴叫頻率。
- * 6. 本地端與伺服器雙向同步：發送感測值至電腦，並接收電腦端久坐/缺水判定以連動蜂鳴器。
+ * 1. 透過 USB 傳輸線與電腦進行 115200 速率的 Serial 序列埠通訊。
+ * 2. 讀取 HX711 智慧杯墊重量 (5kg 壓力感測器)，支援使用者主動歸零校正（Tare）。
+ * 3. 讀取 HC-SR04 超音波距離感測器，偵測坐姿距離。
+ * 4. 直接驅動並讀取 GP2Y1010AU0F 光學粉塵感測器。
+ * 5. 依據異常健康狀況數量，利用 PWM 控制無源蜂鳴器警報。
+ * 6. 透過 Serial 接收來自電腦的健康危害階段指令以連動蜂鳴器。
  * 
  * 依賴庫（請在 Arduino IDE 庫管理器中安裝）：
  * - HX711 (by Bogdan Necula)
  * - ArduinoJson (by Benoit Blanchon, 建議 v6 或 v7)
- * - WebSockets (by Markus Sattler / Links2004)
  */
 
-#include <WiFi.h>
 #include <ArduinoJson.h>
-#include <WebSocketsClient.h>
 #include <HX711.h>
 
-// ================= 1. 使用者環境設定 =================
-const char* ssid     = "您的WiFi名稱";
-const char* password = "您的WiFi密碼";
-const char* ws_host  = "192.168.1.100";  // 執行 server.py 的電腦 IP 位址
-const int   ws_port  = 3000;
-
-// ================= 2. 硬體腳位定義 =================
+// ================= 1. 硬體腳位定義 =================
 // HC-SR04 超音波距離
 const int TRIG_PIN = 22;
 const int ECHO_PIN = 23;
@@ -35,265 +26,449 @@ const int ECHO_PIN = 23;
 const int HX711_DOUT = 19;
 const int HX711_SCK  = 18;
 HX711 scale;
-float scale_calibration_factor = 420.0; // 秤重校準參數
 
 // GP2Y1010AU0F 粉塵感測器直連
-const int DUST_LED_PIN = 27;     // 接粉塵感測器 Pin 3 (LED 控制腳)
-const int DUST_ANALOG_PIN = 34;  // 接粉塵感測器 Pin 5 (Vo 輸出腳，經分壓電阻接至 GPIO34/ADC1_CH6)
+const int DUST_LED_PIN    = 27;   // Pin 3 (LED 控制腳)
+const int DUST_ANALOG_PIN = 34;   // Pin 5 (Vo 輸出腳，需分壓電阻)
 
 // 無源蜂鳴器 (PWM 控制)
+// 注意：ESP32 Arduino Core v3.x 新版 API，直接使用腳位號，不再需要通道號
 const int BUZZER_PIN = 21;
-const int pwmChannel = 0;
-const int pwmResolution = 8;
+const int BUZZER_RES = 8; // 8-bit 解析度 (0-255)
 
-// ================= 3. 系統狀態變數 =================
-float current_weight = 0.0;
+// ================= 2. 坐姿距離警告門檻 =================
+// 說明：超音波感測器安裝於螢幕正前方，偵測使用者的頭/胸部距離。
+// 可以根據你的安裝位置往下調整這兩個數值。
+const float POSTURE_MILD_CM   = 50.0; // 超過此距離 -> 輕微太近警告
+const float POSTURE_SEVERE_CM = 35.0; // 超過此距離 -> 嚴重太近警告
+
+// ================= 3. 水杯校正與飲水偵測參數 =================
+// 飲水偵測邏輯（方案 B：單階滿杯校正 + 狀態機判定）：
+//   使用者放上裝滿水的水杯後點擊歸零校正，ESP32 收到 {"cmd":"tare"}，
+//   此時以當前重量做為基準 0g。當水杯被拿起，重量會急速下降，判定為正在喝水，
+//   並記錄最低的負值（絕對值即為本杯水原重量）。放下後，依據放下穩定後的重量
+//   與拿起前的差值，計算喝水量並累加。
+
+const int   TARE_SAMPLE_COUNT   = 20;    // 歸零時，取樣 20 次平均以確保穩定
+const float LIFT_THRESHOLD_G    = 80.0;  // 拿起水杯的門檻值 (g)
+
+bool  is_calibrated         = false; // 使用者是否已主動完成歸零校正
+float original_full_weight  = 0.0;   // 本杯水原重量 (g)
+float today_water_intake    = 0.0;   // 今日喝水量 (ml)
+float last_stable_weight    = 0.0;   // 上一次穩定的重量基準 (g)
+float current_weight        = 0.0;   // 目前量測到的重量 (g，相對於 Tare 時的 0g，為負值或0)
+bool  is_drinking           = false; // 使用者是否正在喝水（拿起狀態）
+bool  lift_confirmed        = false; // 是否已確認拿起（秤空穩定）
+float min_weight_during_lift= 0.0;   // 拿起杯子期間讀取到的最低重量（最接近淨空狀態的負值）
+float prev_read_weight      = 99999.0; // 上一次讀取到的重量值
+int   stable_count          = 0;     // 連續穩定讀取的次數計數器
+
+// ================= 4. 系統狀態變數 =================
 float current_distance = 0.0;
-float current_pm25 = 0.0;
+float current_pm25     = 0.0;
 
 // 各項健康警告階段 (0 = 正常, 1 = 輕微, 2 = 嚴重)
-int stage_posture = 0;
-int stage_air = 0;
-int stage_sedentary = 0;
+int stage_posture     = 0;
+int stage_air         = 0;
+int stage_sedentary   = 0;
 int stage_dehydration = 0;
 
-int active_warning_count = 0;
-unsigned long last_sensor_send = 0;
-const unsigned long send_interval = 1000; // 每秒發送一次封包
+int           active_warning_count = 0;
+unsigned long last_sensor_send     = 0;
+const unsigned long SEND_INTERVAL  = 1000; // 每秒發送一次封包
 
-WebSocketsClient webSocket;
-
-// ================= 4. 蜂鳴器控制邏輯 =================
+// ================= 5. 蜂鳴器控制 =================
 unsigned long last_beep_time = 0;
+
+// 依警告等級設定音頻與間隔
+struct BuzzerConfig {
+  int freq;
+  int interval_ms;
+};
+
+const BuzzerConfig BUZZER_CONFIGS[] = {
+  {   0,    0 }, // 0 個警告 -> 靜音
+  { 440, 2000 }, // 1 個警告 -> A4，每 2 秒嗶一聲
+  { 660, 1000 }, // 2 個警告 -> E5，每 1 秒嗶一聲
+  { 880,  500 }, // 3 個警告 -> A5，每 0.5 秒嗶一聲
+  {1200,  250 }, // 4 個警告 -> D6，每 0.25 秒嗶一聲
+};
+
+void buzzerBeep(int freq, int duration_ms) {
+  ledcWriteTone(BUZZER_PIN, freq);
+  delay(duration_ms);
+  ledcWriteTone(BUZZER_PIN, 0);
+}
 
 void handleBuzzerSound() {
   if (active_warning_count == 0) {
-    ledcWrite(pwmChannel, 0); // 靜音
+    ledcWriteTone(BUZZER_PIN, 0);
     return;
   }
 
-  int frequency = 440;
-  int interval = 2000;
-  
-  if (active_warning_count == 1) {
-    frequency = 440;   // A4
-    interval = 2000;
-  } else if (active_warning_count == 2) {
-    frequency = 660;   // E5
-    interval = 1000;
-  } else if (active_warning_count == 3) {
-    frequency = 880;   // A5
-    interval = 500;
-  } else if (active_warning_count >= 4) {
-    frequency = 1200;  // D6
-    interval = 250;
-  }
+  int idx = min(active_warning_count, 4);
+  int freq     = BUZZER_CONFIGS[idx].freq;
+  int interval = BUZZER_CONFIGS[idx].interval_ms;
 
-  unsigned long current_time = millis();
-  if (current_time - last_beep_time >= interval) {
-    last_beep_time = current_time;
-    
-    // 每次鳴叫 100 毫秒
-    ledcWriteTone(pwmChannel, frequency);
-    ledcWrite(pwmChannel, 128); // 50% 佔空比
-    delay(100);
-    ledcWrite(pwmChannel, 0);   // 靜音
+  unsigned long now = millis();
+  if (now - last_beep_time >= (unsigned long)interval) {
+    last_beep_time = now;
+    // 嗶聲持續 120ms
+    ledcWriteTone(BUZZER_PIN, freq);
+    ledcWrite(BUZZER_PIN, 200); // 約 78% 佔空比
+    delay(120);
+    ledcWrite(BUZZER_PIN, 0);
+    ledcWriteTone(BUZZER_PIN, 0);
   }
 }
 
-// ================= 5. 傳感器數據讀取 =================
+// ================= 6. 傳感器數據讀取 =================
+
+// 6-1 超音波距離
 void readDistance() {
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-  
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
-  if (duration == 0) {
-    current_distance = 100.0;
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000); // 逾時 30ms
+  current_distance = (duration == 0) ? 200.0 : (duration * 0.034 / 2.0);
+}
+
+// 6-2 秤重（含飲水偵測，狀態機與穩定濾波版）
+// 回傳值：true = 本次偵測到「飲水動作」，false = 無飲水或尚未校正
+bool readWeightAndDetectDrink() {
+  if (!scale.is_ready()) return false;
+
+  // 讀取當前重量（相對於 Tare 時的滿水杯，通常是 0 或負數）
+  float raw_g = scale.get_units(3); // 降低取樣次數以加快讀取速度，並減少延遲
+  current_weight = raw_g;
+
+  if (!is_calibrated) return false;
+
+  bool did_drink = false;
+
+  // 1. 計算穩定度：當前讀值與前一次讀值的差，若小於 5.0g 則視為穩定
+  float diff = abs(current_weight - prev_read_weight);
+  bool is_stable = (prev_read_weight != 99999.0) && (diff < 5.0);
+  prev_read_weight = current_weight;
+
+  if (is_stable) {
+    stable_count++;
   } else {
-    current_distance = duration * 0.034 / 2.0;
+    stable_count = 0;
   }
+
+  // 2. 狀態機判定：
+  if (!is_drinking) {
+    // A. 尚未拿起：重量小於穩定基準減去 LIFT_THRESHOLD_G (80g) ➔ 觸發拿起
+    if (current_weight < last_stable_weight - LIFT_THRESHOLD_G) {
+      is_drinking = true;
+      lift_confirmed = false;
+      stable_count = 0;
+      min_weight_during_lift = current_weight;
+      Serial.println("[狀態機] 偵測到拿起水杯，等待秤空穩定...");
+    } else {
+      // 若正常放置於杯墊上，且讀值穩定，且重量有增加大於 30g（例如加水），更新基準重量
+      if (is_stable && stable_count >= 3 && current_weight > last_stable_weight + 30.0) {
+        last_stable_weight = current_weight;
+        Serial.print("[狀態機] 偵測到加水/調整，更新穩定重量為：");
+        Serial.println((int)last_stable_weight);
+      }
+    }
+  } else {
+    // B. 已進入拿起狀態
+    
+    // a. 等待完全拿開（空載穩定）
+    if (!lift_confirmed) {
+      if (current_weight < min_weight_during_lift) {
+        min_weight_during_lift = current_weight;
+      }
+      // 連續 3 次穩定，且讀值小於 last_stable_weight - 80g
+      if (is_stable && stable_count >= 3 && current_weight < last_stable_weight - LIFT_THRESHOLD_G) {
+        lift_confirmed = true;
+        min_weight_during_lift = current_weight;
+        original_full_weight = abs(min_weight_during_lift);
+        stable_count = 0; // 重設計數給放下使用
+        Serial.print("[狀態機] ✅ 拿起確認！秤空穩定重量：");
+        Serial.print((int)min_weight_during_lift);
+        Serial.print(" g，本杯水原重量：");
+        Serial.print((int)original_full_weight);
+        Serial.println(" g");
+      }
+    }
+    // b. 已確認完全拿起，等待放回
+    else {
+      // 放回條件：重量顯著回升（大於最低重量 + 80g），且連續穩定
+      if (current_weight > min_weight_during_lift + 80.0) {
+        if (is_stable && stable_count >= 3) {
+          float delta = last_stable_weight - current_weight;
+          
+          if (delta >= 15.0) { // 喝水超過 15g 判定為喝水
+            today_water_intake += delta;
+            did_drink = true;
+            Serial.print("[狀態機] ✅ 放下水杯！本次喝水：");
+            Serial.print((int)delta);
+            Serial.print(" g，今日累計：");
+            Serial.print((int)today_water_intake);
+            Serial.println(" ml");
+          } else {
+            Serial.println("[狀態機] 放下水杯！未檢測到有效飲水（或僅是隨手拿放）。");
+          }
+          
+          // 回歸正常狀態
+          last_stable_weight = current_weight;
+          is_drinking = false;
+          lift_confirmed = false;
+          stable_count = 0;
+        }
+      } else {
+        // 如果重量又掉回去（如手抖或尚未放好），重設計數
+        stable_count = 0;
+      }
+    }
+  }
+
+  return did_drink;
 }
 
-void readWeight() {
-  if (scale.is_ready()) {
-    current_weight = scale.get_units(3);
-    if (current_weight < 0) current_weight = 0;
-  }
-}
-
-// GP2Y1010AU0F 直連精確採樣
-unsigned long last_pm25_read = 0;
-const unsigned long pm25_read_interval = 1000; // 每秒讀取一次
+// 6-3 PM2.5 粉塵感測器
+unsigned long last_pm25_read     = 0;
+const unsigned long PM25_INTERVAL = 1000;
 
 void readPM25Direct() {
-  if (millis() - last_pm25_read >= pm25_read_interval) {
-    last_pm25_read = millis();
-    
-    // 1. 開啟紅外線 LED (低電平觸發開關)
-    digitalWrite(DUST_LED_PIN, LOW); 
-    delayMicroseconds(280); // 等待 280µs 穩定
-    
-    // 2. 進行 ADC 類比讀取 (GPIO34)
-    float raw = analogRead(DUST_ANALOG_PIN); 
-    
-    delayMicroseconds(40);
-    // 3. 關閉紅外線 LED
-    digitalWrite(DUST_LED_PIN, HIGH); 
-    
-    // 4. 計算輸入電壓 (12-bit ADC: 0-4095, 參考電壓 3.3V)
-    float measured_voltage = raw * (3.3 / 4095.0);
-    
-    // 5. 補償分壓電阻比例
-    // 我們在電路中建議使用 10kΩ 與 15kΩ 串聯分壓，分壓比例為 15/(10+15) = 0.6
-    // 因此真實輸出電壓為 measured_voltage / 0.6
-    float sensor_voltage = measured_voltage / 0.6;
-    
-    // 6. 依據 Sharp 官方關係式計算 PM2.5 濃度 (ug/m3)
-    float dustDensity = 170.0 * sensor_voltage - 100.0;
-    if (dustDensity < 0) {
-      dustDensity = 0.0;
-    }
-    
-    // 一階低通濾波 (平滑數據，權重 80% 舊值, 20% 新值)
-    current_pm25 = (current_pm25 * 0.8) + (dustDensity * 0.2);
-  }
+  if (millis() - last_pm25_read < PM25_INTERVAL) return;
+  last_pm25_read = millis();
+
+  digitalWrite(DUST_LED_PIN, LOW);
+  delayMicroseconds(280);
+  float raw = analogRead(DUST_ANALOG_PIN);
+  delayMicroseconds(40);
+  digitalWrite(DUST_LED_PIN, HIGH);
+
+  float voltage      = raw * (3.3 / 4095.0);
+  float real_voltage = voltage / 0.6;          // 補償分壓比 (10k / (10k+15k))
+  float dust         = 170.0 * real_voltage - 100.0;
+  if (dust < 0) dust = 0;
+
+  current_pm25 = current_pm25 * 0.8 + dust * 0.2; // 低通濾波
 }
 
-// 本地安全判定 (離線時的警報防護)
+// 本地警告判定（離線備援）
 void updateLocalWarningStages() {
-  if (current_distance < 25) stage_posture = 2;
-  else if (current_distance < 35) stage_posture = 1;
-  else stage_posture = 0;
+  // 坐姿
+  if      (current_distance < POSTURE_SEVERE_CM) stage_posture = 2;
+  else if (current_distance < POSTURE_MILD_CM)   stage_posture = 1;
+  else                                            stage_posture = 0;
 
-  if (current_pm25 >= 75) stage_air = 2;
+  // 空氣品質
+  if      (current_pm25 >= 75) stage_air = 2;
   else if (current_pm25 >= 35) stage_air = 1;
-  else stage_air = 0;
+  else                         stage_air = 0;
 }
 
 void calculateWarningCount() {
-  int count = 0;
-  if (stage_posture > 0) count++;
-  if (stage_air > 0) count++;
-  if (stage_sedentary > 0) count++;
-  if (stage_dehydration > 0) count++;
-  active_warning_count = count;
+  active_warning_count =
+    (stage_posture     > 0 ? 1 : 0) +
+    (stage_air         > 0 ? 1 : 0) +
+    (stage_sedentary   > 0 ? 1 : 0) +
+    (stage_dehydration > 0 ? 1 : 0);
 }
 
-// ================= 6. WebSocket 資料通訊 =================
-void sendSensorPacket() {
-  StaticJsonDocument<300> doc;
+// ================= 7. Serial 資料通訊 =================
+
+void sendSensorPacket(bool is_drinking_state) {
+  StaticJsonDocument<512> doc;
   doc["device_id"] = "virtual_esp32_01";
   doc["timestamp"] = millis() / 1000;
-  
+
   JsonObject sensors = doc.createNestedObject("sensors");
-  sensors["weight"] = (int)current_weight;
-  sensors["distance"] = (int)current_distance;
-  sensors["pm25"] = (int)current_pm25;
+  
+  // 計算發送給前端的顯示重量（正數剩餘重）：
+  // 若未校正，則為原始讀值；若已校正且正在喝水(拿起)，顯示 0；若已校正且放下，顯示剩餘重量
+  int display_weight = 0;
+  if (!is_calibrated) {
+    display_weight = scale.is_ready() ? (int)scale.get_units(1) : 0;
+  } else {
+    if (is_drinking_state) {
+      display_weight = 0;
+    } else {
+      display_weight = (int)(original_full_weight + current_weight);
+      if (display_weight < 0) display_weight = 0;
+    }
+  }
+  
+  sensors["weight"]    = display_weight;                // 發送給前端的顯示重量 (g)
+  sensors["raw_hx711"] = scale.is_ready() ? (long)scale.get_units(1) : 0; // 即時原始讀取值
+  sensors["distance"]  = (int)current_distance;
+  sensors["pm25"]      = (int)current_pm25;
 
   JsonObject status = doc.createNestedObject("status");
-  status["is_drinking"] = false;
-  status["posture"] = (stage_posture == 2) ? "too_close" : ((stage_posture == 1) ? "slouched" : "good");
-  status["air_quality"] = (stage_air == 2) ? "danger" : ((stage_air == 1) ? "poor" : "excellent");
-  
-  String output;
-  serializeJson(doc, output);
-  webSocket.sendTXT(output);
+  status["is_drinking"]  = is_drinking_state;
+  status["calibrated"]   = is_calibrated; // ★ 回傳校正狀態讓前端顯示
+  status["original_full_weight"] = (int)original_full_weight;
+  status["today_water"] = (int)today_water_intake;
+  status["posture"]      = (current_distance < POSTURE_SEVERE_CM) ? "too_close"
+                         : (current_distance < POSTURE_MILD_CM)   ? "slouched"
+                         : "good";
+  status["air_quality"]  = (current_pm25 >= 75) ? "danger"
+                         : (current_pm25 >= 35) ? "poor"
+                         : "excellent";
+
+  serializeJson(doc, Serial);
+  Serial.println();
 }
 
-void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
-  switch(type) {
-    case WStype_DISCONNECTED:
-      Serial.println("[WS] 連線已中斷");
-      break;
-    case WStype_CONNECTED:
-      Serial.println("[WS] 已連線至伺服器");
-      break;
-    case WStype_TEXT:
-      {
-        StaticJsonDocument<500> doc;
-        DeserializationError error = deserializeJson(doc, payload);
-        if (error) return;
+// 執行使用者主動歸零校正 (方案 B：以當前裝滿水狀態為基準歸零)
+void performTare() {
+  if (!scale.is_ready()) {
+    Serial.println("[Tare] ⚠️ HX711 未就緒，歸零失敗！");
+    return;
+  }
 
-        if (doc.containsKey("status")) {
-          JsonObject status = doc["status"];
-          if (status.containsKey("posture_stage")) stage_posture = status["posture_stage"];
-          if (status.containsKey("air_stage")) stage_air = status["air_stage"];
-          if (status.containsKey("sedentary_stage")) stage_sedentary = status["sedentary_stage"];
-          if (status.containsKey("dehydration_stage")) stage_dehydration = status["dehydration_stage"];
-          
-          calculateWarningCount();
-        }
+  Serial.println("[Tare] 開始歸零校正 (方案B：以當前裝滿水狀態為基準)...");
+  scale.tare(TARE_SAMPLE_COUNT); // 取樣 20 次平均，將當前重量設為 0
+  scale.set_scale(420.0);        // 設定換算係數
+
+  is_calibrated = true;
+  last_stable_weight = 0.0;
+  current_weight = 0.0;
+  original_full_weight = 0.0;  // 初始設為 0，等拿起後由狀態機自動校正為實際值
+  is_drinking = false;
+  lift_confirmed = false;
+  prev_read_weight = 99999.0;
+  stable_count = 0;
+
+  Serial.println("[Tare] ✅ 裝滿水校正完成！現在可以拿起水杯進行喝水。");
+
+  // 播放雙短音表示校正完成 (v3.x API)
+  ledcWriteTone(BUZZER_PIN, 1200);
+  ledcWrite(BUZZER_PIN, 200);
+  delay(100);
+  ledcWrite(BUZZER_PIN, 0);
+  ledcWriteTone(BUZZER_PIN, 0);
+  delay(80);
+  ledcWriteTone(BUZZER_PIN, 1600);
+  ledcWrite(BUZZER_PIN, 200);
+  delay(100);
+  ledcWrite(BUZZER_PIN, 0);
+  ledcWriteTone(BUZZER_PIN, 0);
+}
+
+void checkIncomingSerial() {
+  if (!Serial.available()) return;
+
+  StaticJsonDocument<300> doc;
+  DeserializationError err = deserializeJson(doc, Serial);
+  if (err) return;
+
+  // ★ 處理使用者主動歸零指令 / 蜂鳴器測試
+  if (doc.containsKey("cmd")) {
+    String cmd = doc["cmd"].as<String>();
+    if (cmd == "tare") {
+      performTare();
+    } else if (cmd == "test_buzzer") {
+      // 播放三段音確認蜂鳴器正常 (Do-Mi-Sol)
+      Serial.println("[蜂鳴器] 確認音測試...");
+      int testFreqs[] = {523, 659, 784}; // C5, E5, G5
+      for (int i = 0; i < 3; i++) {
+        ledcWriteTone(BUZZER_PIN, testFreqs[i]);
+        ledcWrite(BUZZER_PIN, 200);
+        delay(150);
+        ledcWrite(BUZZER_PIN, 0);
+        ledcWriteTone(BUZZER_PIN, 0);
+        delay(60);
       }
-      break;
+      Serial.println("[蜂鳴器] 確認音完成");
+    }
+    return;
+  }
+
+  if (doc.containsKey("status")) {
+    JsonObject st = doc["status"];
+    if (st.containsKey("posture_stage"))     stage_posture     = st["posture_stage"];
+    if (st.containsKey("air_stage"))         stage_air         = st["air_stage"];
+    if (st.containsKey("sedentary_stage"))   stage_sedentary   = st["sedentary_stage"];
+    if (st.containsKey("dehydration_stage")) stage_dehydration = st["dehydration_stage"];
+    calculateWarningCount();
   }
 }
 
-// ================= 7. 初始化與主循環 =================
+// ================= 8. 初始化 =================
 void setup() {
   Serial.begin(115200);
+  delay(500);
 
-  // 初始化超音波腳位
+  Serial.println("\n[系統] ESP32 啟動中...");
+
+  // 超音波腳位
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
-  // 初始化 GP2Y1010AU0F 直連腳位
+  // 粉塵感測器腳位
   pinMode(DUST_LED_PIN, OUTPUT);
-  digitalWrite(DUST_LED_PIN, HIGH); // 預設關閉 LED (High)
+  digitalWrite(DUST_LED_PIN, HIGH);
   pinMode(DUST_ANALOG_PIN, INPUT);
 
-  // 初始化無源蜂鳴器 (LEDC PWM)
-  ledcSetup(pwmChannel, 2000, pwmResolution);
-  ledcAttachPin(BUZZER_PIN, pwmChannel);
-  ledcWrite(pwmChannel, 0); // 預設靜音
+  // 蜂鳴器初始化（ESP32 Core v3.x 新版 API：ledcAttach，不再需要 ledcSetup+ledcAttachPin）
+  ledcAttach(BUZZER_PIN, 2000, BUZZER_RES);
+  ledcWrite(BUZZER_PIN, 0);
 
-  // 初始化 HX711 秤重模組
+  // 開機測試音：嗶一聲確認蜂鳴器正常
+  Serial.println("[蜂鳴器] 開機測試音...");
+  ledcWriteTone(BUZZER_PIN, 1000);
+  ledcWrite(BUZZER_PIN, 200);
+  delay(200);
+  ledcWrite(BUZZER_PIN, 0);
+  ledcWriteTone(BUZZER_PIN, 0);
+
+  // HX711 秤重模組初始化（僅初始化，不自動歸零）
+  Serial.println("[杯墊] 初始化 HX711...");
   scale.begin(HX711_DOUT, HX711_SCK);
+  scale.set_scale(420.0); // 預設換算係數，可在歸零後重新設定
 
-  // 連線 Wi-Fi
-  Serial.print("正在連線至 Wi-Fi: ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+  // 等待秤重模組就緒
+  int wait_count = 0;
+  while (!scale.is_ready() && wait_count < 50) {
+    delay(100);
+    wait_count++;
     Serial.print(".");
   }
-  Serial.println("\nWiFi 連線成功！");
+  Serial.println();
 
-  // 初始化 WebSocket
-  webSocket.begin(ws_host, ws_port, "/");
-  webSocket.onEvent(webSocketEvent);
-  webSocket.setReconnectInterval(5000);
+  if (scale.is_ready()) {
+    Serial.println("[杯墊] ✅ HX711 就緒！");
+    Serial.println("[杯墊] ⚠️ 尚未歸零校正，請在網頁按下「歸零校正」按鈕後再使用飲水偵測。");
+  } else {
+    Serial.println("[杯墊] ⚠️ 警告：HX711 未就緒，請檢查接線！");
+  }
+
+  Serial.println("[系統] 初始化完成！請在網頁端點擊「歸零校正」按鈕以啟用飲水偵測。");
 }
 
+// ================= 9. 主循環 =================
 void loop() {
-  webSocket.loop();
-
-  // 1. 讀取感測器數值
+  // 1. 讀取各感測器
   readDistance();
-  readWeight();
-  readPM25Direct(); // ESP32 直接採樣
+  bool did_drink = readWeightAndDetectDrink();
+  readPM25Direct();
 
-  // 2. 本地預警判定 (當沒接到 WebSocket 時作為備援)
-  if (!webSocket.isConnected()) {
-    updateLocalWarningStages();
-    stage_sedentary = 0;
-    stage_dehydration = 0;
-    calculateWarningCount();
+  // 2. 每秒傳送一次感測器封包
+  unsigned long now = millis();
+  if (now - last_sensor_send >= SEND_INTERVAL) {
+    last_sensor_send = now;
+    sendSensorPacket(is_drinking);
   }
 
-  // 3. 每隔一秒向 WebSocket 伺服器傳送最新感測器數據
-  unsigned long current_time = millis();
-  if (current_time - last_sensor_send >= send_interval) {
-    last_sensor_send = current_time;
-    if (webSocket.isConnected()) {
-      sendSensorPacket();
-    }
-  }
+  // 3. 接收來自電腦的警告階段回饋
+  checkIncomingSerial();
 
-  // 4. 動態控制無源蜂鳴器警報發聲
+  // 4. 本地備援判定（當 Serial 斷線時仍能鳴叫）
+  updateLocalWarningStages();
+  calculateWarningCount();
+
+  // 5. 控制蜂鳴器
   handleBuzzerSound();
 
   delay(20);

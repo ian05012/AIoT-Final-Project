@@ -36,11 +36,21 @@ func _process(delta):
             var text = packet.get_string_from_utf8()
             _parse_json_packet(text)
             
-    elif state == WebSocketPeer.STATE_CLOSED or state == WebSocketPeer.STATE_CONNECTING:
+    elif state == WebSocketPeer.STATE_CONNECTING:
+        # 連線中：等待，不重置也不重連，但若超時就強制關閉再重試
+        reconnect_timer += delta
+        if reconnect_timer >= RECONNECT_INTERVAL:
+            reconnect_timer = 0.0
+            print("[Network] 連線逾時，重新嘗試...")
+            socket = WebSocketPeer.new()
+            _connect_ws()
+
+    elif state == WebSocketPeer.STATE_CLOSED:
         if is_connected:
             print("[Network] WebSocket 連線中斷！")
             is_connected = false
-            
+            reconnect_timer = 0.0
+
         # 自動重連計時器
         reconnect_timer += delta
         if reconnect_timer >= RECONNECT_INTERVAL:

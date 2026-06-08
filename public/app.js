@@ -1,15 +1,20 @@
 // WebSocket 連線管理
+console.log("=== app.js v=fix2 loaded, WS target: ws://127.0.0.1:3000 ===");
 let socket = null;
-const WS_URL = `ws://${window.location.hostname || "localhost"}:3000`;
+// 強制使用 127.0.0.1，避免 Windows 11 將 localhost 解析為 ::1 (IPv6)
+// 導致連不上只監聽 IPv4 的舊版後端（現在後端已支援雙棧，但明確 IP 更穩定）
+const WS_URL = `ws://127.0.0.1:3000`;
 const reconnectInterval = 3000;
 
 // 感測器狀態數據 (預設正常值)
 const state = {
-    weight: 350,       // 水杯重量 (g)
+    weight: 0,       // 水杯重量 (g)
     distance: 60,      // 超音波距離 (cm)
     pm25: 15,          // PM2.5 粉塵濃度 (μg/m³)
     time: 0,           // 久坐時間 (分鐘)
     noWaterTime: 0,    // 久未飲水時間 (分鐘)
+    sittingDuration: 0, // 累積坐下時間 (秒)
+    standUpDuration: 0, // 累積起來走動時間 (秒)
     
     // 危害狀態布林值 (支援多重疊加)
     health: 10,        // 健康值 (0-10)
@@ -32,7 +37,11 @@ const state = {
     isMouseHovering: false,  // 滑鼠是否懸停在史萊姆身上
     actionState: "IDLE",     // 目前主要顯示的行為
     todayWater: 0,     // 今日飲水量 (ml)
-    prevWeight: 350,   // 上次重量 (用來偵測喝水)
+    prevWeight: 0,   // 上次重量 (用來偵測喝水)
+    originalFullWeight: 0, // ★ 本杯水原重量 (g)
+    calibrated: false, // ★ 同步已校正狀態
+    isPhysicalMode: false, // ★ 是否為實體硬體模式（若為真，跳過網頁本機喝水檢測）
+    lastManualInputTime: 0, // ★ 最近一次手動操作的時間戳記 (毫秒)
     
     // 蜂鳴器相關狀態
     buzzerMuted: true,        // 是否靜音 (預設靜音)
@@ -379,6 +388,8 @@ const elValNoWater = document.getElementById("val-no-water");
 const elBtnDrink = document.getElementById("btn-drink");
 const elBtnRefill = document.getElementById("btn-refill");
 const elBtnDry = document.getElementById("btn-dry");
+const elBtnTare = document.getElementById("btn-tare");         // ★ 歸零校正按鈕
+const elTareStatus = document.getElementById("tare-status"); // ★ 校正狀態徽統
 const elBtnSlouch = document.getElementById("btn-slouch");
 const elBtnGoodPosture = document.getElementById("btn-good-posture");
 const elBtnHighPM25 = document.getElementById("btn-high-pm25");
@@ -396,9 +407,49 @@ const elAirPoison = document.getElementById("air-poison");
 const elConsoleLog = document.getElementById("console-log");
 const elBtnClearConsole = document.getElementById("btn-clear-console");
 const elBtnToggleBuzzer = document.getElementById("btn-toggle-buzzer");
+const elBtnTestBuzzer   = document.getElementById("btn-test-buzzer"); // ★ 確認音按鈕
 const elBuzzerStatusIndicator = document.getElementById("buzzer-status-indicator");
 
-// 建立心形血量條
+
+// ★ HX711 即時監視器元素
+const elHX711Weight = document.getElementById("hx711-weight");
+const elHX711OriginalFull = document.getElementById("hx711-original-full");
+const elHX711Raw    = document.getElementById("hx711-raw");
+const elHX711Bar    = document.getElementById("hx711-bar");
+
+// ★ HX711 即時監視器更新
+let _prevDisplayWeight = null;
+function updateHX711Monitor(calibratedG, rawG, isCalibrated = true) {
+    if (!isCalibrated) {
+        // 未校正模式：顯示警告，不顯示平台自重（避免誤導使用者）
+        elHX711Weight.innerText      = "⚠ 未校正";
+        elHX711Weight.style.color    = "#f59e0b";
+        if (elHX711OriginalFull) elHX711OriginalFull.innerText = "--";
+        elHX711Raw.innerText         = `${rawG !== null ? rawG : '--'}`;
+        elHX711Bar.style.height      = "0%";
+        elHX711Bar.style.marginTop   = "100%";
+        _prevDisplayWeight = null;
+        return;
+    }
+
+    // 校正後模式：正常顯示
+    elHX711Weight.innerText = calibratedG !== null ? calibratedG : "--";
+    elHX711Raw.innerText    = rawG    !== null ? rawG    : "--";
+
+    // 填充條（上限 1000g）
+    const pct = Math.min(100, Math.max(0, (calibratedG / 1000) * 100));
+    elHX711Bar.style.height    = pct + "%";
+    elHX711Bar.style.marginTop = (100 - pct) + "%";
+
+    // 數字閃爍：增加→綠色，減少→紅色
+    if (_prevDisplayWeight !== null && calibratedG !== _prevDisplayWeight) {
+        const isIncrease = calibratedG > _prevDisplayWeight;
+        elHX711Weight.style.color = isIncrease ? "#86efac" : "#f87171";
+        setTimeout(() => { elHX711Weight.style.color = "#4ade80"; }, 400);
+    }
+    _prevDisplayWeight = calibratedG;
+}
+
 function updateHeartsUI() {
     elHeartsContainer.innerHTML = "";
     const fullHearts = Math.floor(state.health);
@@ -518,6 +569,7 @@ function updateBuzzer() {
 
 // 連線 WebSocket 伺服器
 function connectWebSocket() {
+    elWsStatus.querySelector(".status-text").innerText = "WS CONNECTING...";
     socket = new WebSocket(WS_URL);
 
     socket.onopen = () => {
@@ -534,6 +586,10 @@ function connectWebSocket() {
             
             if (data.device_id === "virtual_esp32_01" || data.device_id === "virtual_esp32_other") {
                 updateStateFromPacket(data);
+                // 如果是來自硬體的原始感測器數據封包（沒有經過網頁端計算過健康階段狀態），就由網頁端計算後進行廣播
+                if (data.status && data.status.posture_stage === undefined) {
+                    sendPacket();
+                }
             }
         } catch (e) {
             console.error("解析 JSON 錯誤: ", e);
@@ -544,6 +600,7 @@ function connectWebSocket() {
         elWsStatus.querySelector(".status-dot").className = "status-dot disconnected";
         elWsStatus.querySelector(".status-text").innerText = "WS DISCONNECTED";
         logConsole("SYSTEM", "WebSocket 連線中斷，正在嘗試重新連線...", "outbound");
+        state.isPhysicalMode = false; // 連線中斷時切換回模擬模式
         setTimeout(connectWebSocket, reconnectInterval);
     };
 
@@ -554,24 +611,79 @@ function connectWebSocket() {
 
 // 更新本地狀態並同步控制項 UI
 function updateStateFromPacket(packet) {
-    state.weight = packet.sensors.weight;
-    state.distance = packet.sensors.distance;
-    state.pm25 = packet.sensors.pm25;
-    state.time = packet.status.sedentary_minutes;
-    if (packet.status.no_water_minutes !== undefined) {
+    state.isPhysicalMode = true; // 收到實體封包，自動開啟硬體模式
+    
+    // 如果最近 15 秒內有手動操作，則忽略實體感測器的覆蓋，以利手動測試
+    const isManualBypass = state.lastManualInputTime && (Date.now() - state.lastManualInputTime < 15000);
+    
+    if (!isManualBypass) {
+        state.weight   = packet.sensors.weight;
+        state.distance = packet.sensors.distance;
+        state.pm25     = packet.sensors.pm25;
+    }
+
+    // ★ Bug fix: ESP32 硬體封包沒有 sedentary_minutes 欄位，
+    //   若直接讀取會得到 undefined，再經 parseInt 變 NaN，
+    //   JSON.stringify(NaN)==="null"，導致下次循環變成 "null min"。
+    //   只有封包中有有效數字時才更新。
+    if (typeof packet.status.sedentary_minutes === 'number' && !isNaN(packet.status.sedentary_minutes)) {
+        state.time = packet.status.sedentary_minutes;
+    }
+    if (packet.status.no_water_minutes !== undefined && packet.status.no_water_minutes !== null) {
         state.noWaterTime = packet.status.no_water_minutes;
     }
+
+    // ★ 同步 ESP32 歸零校正狀態
+    if (packet.status.calibrated !== undefined) {
+        state.calibrated = packet.status.calibrated === true;
+        updateTareStatusBadge(state.calibrated);
+    }
+
+    // ★ 同步 ESP32 喝水狀態與校正原始值
+    const wasDrinking = state.isDrinking;
+    const isNowDrinking = packet.status.is_drinking === true;
+    if (packet.status.is_drinking !== undefined) {
+        state.isDrinking = isNowDrinking;
+    }
+    if (packet.status.original_full_weight !== undefined) {
+        state.originalFullWeight = packet.status.original_full_weight;
+        elHX711OriginalFull.innerText = (state.calibrated && state.originalFullWeight > 0) ? state.originalFullWeight : "--";
+    }
+    if (packet.status.today_water !== undefined) {
+        state.todayWater = packet.status.today_water;
+        elMetricWater.innerText = `${state.todayWater} / 2000 ml`;
+    }
+
+    // 放下杯子結束喝水時，觸發開心特效與加血
+    if (wasDrinking && !isNowDrinking) {
+        state.isHappy = true;
+        if (happyTimer) clearTimeout(happyTimer);
+        happyTimer = setTimeout(() => {
+            state.isHappy = false;
+        }, 2500);
+        logConsole("APP EVENT", "實體水杯已放回，史萊姆感到十分高興！", "inbound");
+        state.health = Math.min(10, state.health + 1.5);
+    }
+
+    // ★ 更新 HX711 即時監視器
+    const rawVal = (packet.sensors.raw_hx711 !== undefined) ? packet.sensors.raw_hx711 : packet.sensors.weight;
+    updateHX711Monitor(packet.sensors.weight, rawVal, state.calibrated);
     
-    elSliderWeight.value = state.weight;
-    elValWeight.innerText = `${state.weight}g`;
-    elSliderDistance.value = state.distance;
-    elValDistance.innerText = `${state.distance}cm`;
-    elSliderPM25.value = state.pm25;
-    elValPM25.innerText = `${state.pm25} μg/m³`;
-    elSliderTime.value = state.time;
+    if (!isManualBypass) {
+        elSliderWeight.value  = state.weight;
+        elValWeight.innerText = `${state.weight}g`;
+        elSliderDistance.value  = state.distance;
+        elValDistance.innerText = `${state.distance}cm`;
+        elSliderPM25.value  = state.pm25;
+        elValPM25.innerText = `${state.pm25} μg/m³`;
+    }
+    elSliderTime.value  = state.time;
     elValTime.innerText = `${state.time} min`;
-    elSliderNoWater.value = state.noWaterTime;
+    elSliderNoWater.value  = state.noWaterTime;
     elValNoWater.innerText = `${state.noWaterTime} min`;
+
+    // 避免本地模擬與實體包衝突，同步 prevWeight
+    state.prevWeight = state.weight;
 
     processThresholds();
 }
@@ -581,41 +693,43 @@ let drinkTimer = null;
 let happyTimer = null;
 let eatTimer = null;
 function processThresholds() {
-    // 1. 喝水判定：水杯重量減少超過 50g
-    if (state.prevWeight - state.weight >= 50) {
-        if (!state.isDrinking) {
-            state.isDrinking = true;
-            state.isHappy = false; // 喝水中先關閉開心
-            
-            // 喝水時將久未飲水時間歸零
-            state.noWaterTime = 0;
-            elSliderNoWater.value = 0;
-            elValNoWater.innerText = "0 min";
-            
-            const ml = state.prevWeight - state.weight;
-            state.todayWater += ml;
-            state.health = Math.min(10, state.health + 1.5); // 喝水補血
-            
-            // 2.5 秒喝水動畫
-            if (drinkTimer) clearTimeout(drinkTimer);
-            drinkTimer = setTimeout(() => {
-                state.isDrinking = false;
-                state.prevWeight = state.weight;
+    // 1. 喝水判定：水杯重量減少超過 50g（僅在模擬模式下啟用，避免與 ESP32 雙重計算）
+    if (!state.isPhysicalMode) {
+        if (state.prevWeight - state.weight >= 50) {
+            if (!state.isDrinking) {
+                state.isDrinking = true;
+                state.isHappy = false; // 喝水中先關閉開心
                 
-                // 喝完水後進入「開心開花狀態」
-                state.isHappy = true;
-                if (happyTimer) clearTimeout(happyTimer);
-                happyTimer = setTimeout(() => {
-                    state.isHappy = false;
+                // 喝水時將久未飲水時間歸零
+                state.noWaterTime = 0;
+                elSliderNoWater.value = 0;
+                elValNoWater.innerText = "0 min";
+                
+                const ml = state.prevWeight - state.weight;
+                state.todayWater += ml;
+                state.health = Math.min(10, state.health + 1.5); // 喝水補血
+                
+                // 2.5 秒喝水動畫
+                if (drinkTimer) clearTimeout(drinkTimer);
+                drinkTimer = setTimeout(() => {
+                    state.isDrinking = false;
+                    state.prevWeight = state.weight;
+                    
+                    // 喝完水後進入「開心開花狀態」
+                    state.isHappy = true;
+                    if (happyTimer) clearTimeout(happyTimer);
+                    happyTimer = setTimeout(() => {
+                        state.isHappy = false;
+                    }, 2500);
+                    
+                    logConsole("APP EVENT", "飲水完成，史萊姆感到非常開心！", "outbound");
                 }, 2500);
                 
-                logConsole("APP EVENT", "飲水完成，史萊姆感到非常開心！", "outbound");
-            }, 2500);
-            
-            logConsole("APP EVENT", `檢測到飲水行為！飲水量: ${ml} ml。今日累計: ${state.todayWater} ml`, "outbound");
+                logConsole("APP EVENT", `檢測到飲水行為！飲水量: ${ml} ml。今日累計: ${state.todayWater} ml`, "outbound");
+            }
+        } else if (state.weight > state.prevWeight) {
+            state.prevWeight = state.weight;
         }
-    } else if (state.weight > state.prevWeight) {
-        state.prevWeight = state.weight;
     }
 
     // 2. 坐姿判定 (距離判定，階段性)
@@ -724,6 +838,40 @@ function processThresholds() {
 
 // 定時健康值扣減與模擬器演化 (每 2.5 秒進行一次判定)
 setInterval(() => {
+    // 久坐與走動時間統計
+    if (state.sittingDuration === undefined) state.sittingDuration = 0;
+    if (state.standUpDuration === undefined) state.standUpDuration = 0;
+
+    let hasTimeChanged = false;
+
+    if (state.distance > 70) {
+        state.standUpDuration += 2.5;
+        state.sittingDuration = 0;
+        
+        if (state.standUpDuration >= 10) { // 持續起來走動達 10 秒
+            if (state.time !== 0) {
+                state.time = 0;
+                elSliderTime.value = 0;
+                elValTime.innerText = "0 min";
+                hasTimeChanged = true;
+                logConsole("SYSTEM", "檢測到起來走動持續達 10 秒，已自動重設久坐時間。", "inbound");
+            }
+            state.standUpDuration = 0;
+        }
+    } else {
+        state.standUpDuration = 0;
+        state.sittingDuration += 2.5;
+        
+        if (state.sittingDuration >= 10) { // 坐下每滿 10 秒 (模擬增加 1 分鐘)
+            state.time += 1;
+            elSliderTime.value = state.time;
+            elValTime.innerText = `${state.time} min`;
+            hasTimeChanged = true;
+            state.sittingDuration = 0;
+            logConsole("SYSTEM", `檢測到持續坐姿，久坐時間自動增加至 ${state.time} 分鐘。`, "inbound");
+        }
+    }
+
     if (state.isSuffocating) {
         state.health = Math.max(0, state.health - 1.2); 
         logConsole("HEALTH LOSS", "空氣品質極差！健康度快速扣減！", "outbound");
@@ -739,6 +887,10 @@ setInterval(() => {
     
     updateHeartsUI();
     processThresholds(); // 再次更新判定
+    
+    if (hasTimeChanged) {
+        sendPacket();
+    }
 }, 2500);
 
 // 發送 JSON 數據封包給伺服器
@@ -754,10 +906,13 @@ function sendPacket() {
             },
             status: {
                 is_drinking: state.isDrinking,
+                calibrated: state.calibrated,
+                original_full_weight: parseInt(state.originalFullWeight) || 0,
+                today_water: parseInt(state.todayWater) || 0,
                 posture: state.isSlouched ? "slouched" : "good",
                 air_quality: state.isSuffocating ? "danger" : (state.pm25 >= 35 ? "poor" : "excellent"),
-                sedentary_minutes: parseInt(state.time),
-                no_water_minutes: parseInt(state.noWaterTime),
+                sedentary_minutes: parseInt(state.time)  || 0, // ★ 防止 NaN 流入 JSON
+                no_water_minutes:  parseInt(state.noWaterTime) || 0,
                 posture_stage: state.postureStage,
                 dehydration_stage: state.dehydrationStage,
                 sedentary_stage: state.sedentaryStage,
@@ -812,15 +967,35 @@ elBtnToggleBuzzer.addEventListener("click", () => {
     updateBuzzer();
 });
 
+// \u2605 ESP32 \u5be6\u9ad4\u8702\u9cf4\u5668\u78ba\u8a8d\u97f3
+elBtnTestBuzzer.addEventListener("click", () => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ cmd: "test_buzzer" }));
+        logConsole("BUZZER TEST", "\u5df2\u5c07\u78ba\u8a8d\u97f3\u6307\u4ee4\u50b3\u9001\u81f3 ESP32\uff0c\u8acb\u807d\u5be6\u9ad4\u8702\u9cf4\u5668\u662f\u5426\u767c\u8072\u3002", "outbound");
+        elBtnTestBuzzer.innerText = "\u23f3 \u767c\u9001\u4e2d...";
+        setTimeout(() => { elBtnTestBuzzer.innerText = "\ud83d\udd14 \u78ba\u8a8d\u97f3\ud83d\udd14"; }, 2500);
+    } else {
+        logConsole("BUZZER TEST", "\u26a0 WebSocket \u672a\u9023\u7dda\uff0c\u7121\u6cd5\u50b3\u9001\u6307\u4ee4\u3002", "outbound");
+    }
+});
+
+// --- 手動輸入旁路機制 ---
+function triggerManualInput() {
+    state.lastManualInputTime = Date.now();
+}
+
 // --- 控制項事件監聽 ---
 elSliderWeight.addEventListener("input", (e) => {
+    triggerManualInput();
     state.weight = parseInt(e.target.value);
     elValWeight.innerText = `${state.weight}g`;
+    updateHX711Monitor(state.weight, state.weight); // 模擬模式下 raw = calibrated
     processThresholds();
     sendPacket();
 });
 
 elSliderDistance.addEventListener("input", (e) => {
+    triggerManualInput();
     state.distance = parseInt(e.target.value);
     elValDistance.innerText = `${state.distance}cm`;
     processThresholds();
@@ -828,6 +1003,7 @@ elSliderDistance.addEventListener("input", (e) => {
 });
 
 elSliderPM25.addEventListener("input", (e) => {
+    triggerManualInput();
     state.pm25 = parseInt(e.target.value);
     elValPM25.innerText = `${state.pm25} μg/m³`;
     processThresholds();
@@ -835,13 +1011,17 @@ elSliderPM25.addEventListener("input", (e) => {
 });
 
 elSliderTime.addEventListener("input", (e) => {
+    triggerManualInput();
     state.time = parseInt(e.target.value);
     elValTime.innerText = `${state.time} min`;
+    state.sittingDuration = 0;
+    state.standUpDuration = 0;
     processThresholds();
     sendPacket();
 });
 
 elSliderNoWater.addEventListener("input", (e) => {
+    triggerManualInput();
     state.noWaterTime = parseInt(e.target.value);
     elValNoWater.innerText = `${state.noWaterTime} min`;
     processThresholds();
@@ -850,6 +1030,7 @@ elSliderNoWater.addEventListener("input", (e) => {
 
 // --- 快捷按鈕事件監聽 ---
 elBtnDrink.addEventListener("click", () => {
+    triggerManualInput();
     const newWeight = Math.max(0, state.weight - 250);
     elSliderWeight.value = newWeight;
     state.weight = newWeight;
@@ -859,6 +1040,7 @@ elBtnDrink.addEventListener("click", () => {
 });
 
 elBtnRefill.addEventListener("click", () => {
+    triggerManualInput();
     elSliderWeight.value = 1000;
     state.weight = 1000;
     state.prevWeight = 1000;
@@ -869,6 +1051,7 @@ elBtnRefill.addEventListener("click", () => {
 });
 
 elBtnDry.addEventListener("click", () => {
+    triggerManualInput();
     elSliderNoWater.value = 90;
     state.noWaterTime = 90;
     elValNoWater.innerText = "90 min";
@@ -876,7 +1059,51 @@ elBtnDry.addEventListener("click", () => {
     sendPacket();
 });
 
+// ★ 歸零校正按鈕
+function updateTareStatusBadge(calibrated) {
+    if (calibrated) {
+        elTareStatus.style.background = "rgba(0,200,80,0.15)";
+        elTareStatus.style.borderColor = "#00c850";
+        elTareStatus.style.color = "#00e864";
+        elTareStatus.innerText = "✅ 已校正";
+    } else {
+        elTareStatus.style.background = "rgba(255,200,0,0.15)";
+        elTareStatus.style.borderColor = "#c8a000";
+        elTareStatus.style.color = "#ffd000";
+        elTareStatus.innerText = "⚠ 尚未校正";
+    }
+}
+
+function sendTareCommand() {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ cmd: "tare" }));
+        logConsole("TARE CMD", "已將歸零指令傳送至 ESP32...", "outbound");
+    } else {
+        logConsole("TARE CMD", "⚠ WebSocket 未連線，無法傳送歸零指令。", "outbound");
+    }
+}
+
+elBtnTare.addEventListener("click", () => {
+    // 按鈕視覺回饋：做進行中狀態
+    elBtnTare.disabled = true;
+    elBtnTare.innerText = "⏳ 歸零中..."
+    elTareStatus.style.background = "rgba(100,150,255,0.15)";
+    elTareStatus.style.borderColor = "#4488ff";
+    elTareStatus.style.color = "#88aaff";
+    elTareStatus.innerText = "⏳ 校正中...";
+
+    sendTareCommand();
+    logConsole("APP EVENT", "杯墊歸零校正指令已發出，請確認杯墊上僅放空杯或淨空。", "outbound");
+
+    // 5 秒後自動恢復按鈕（ESP32 實際嫩等並透過 JSON packet 回傳校正結果）
+    setTimeout(() => {
+        elBtnTare.disabled = false;
+        elBtnTare.innerText = "⚖️ 歸零校正 (Tare)";
+    }, 5500);
+});
+
 elBtnSlouch.addEventListener("click", () => {
+    triggerManualInput();
     elSliderDistance.value = 25;
     state.distance = 25;
     elValDistance.innerText = "25cm";
@@ -886,6 +1113,7 @@ elBtnSlouch.addEventListener("click", () => {
 });
 
 elBtnGoodPosture.addEventListener("click", () => {
+    triggerManualInput();
     elSliderDistance.value = 65;
     state.distance = 65;
     elValDistance.innerText = "65cm";
@@ -895,6 +1123,7 @@ elBtnGoodPosture.addEventListener("click", () => {
 });
 
 elBtnHighPM25.addEventListener("click", () => {
+    triggerManualInput();
     elSliderPM25.value = 150;
     state.pm25 = 150;
     elValPM25.innerText = "150 μg/m³";
@@ -904,19 +1133,23 @@ elBtnHighPM25.addEventListener("click", () => {
 });
 
 elBtnSedentary.addEventListener("click", () => {
+    triggerManualInput();
     elSliderTime.value = 75;
     state.time = 75;
     elValTime.innerText = "75 min";
-    
+    state.sittingDuration = 0;
+    state.standUpDuration = 0;
     processThresholds();
     sendPacket();
 });
 
 elBtnResetTimer.addEventListener("click", () => {
+    triggerManualInput();
     elSliderTime.value = 0;
     state.time = 0;
     elValTime.innerText = "0 min";
-    
+    state.sittingDuration = 0;
+    state.standUpDuration = 0;
     processThresholds();
     sendPacket();
 });

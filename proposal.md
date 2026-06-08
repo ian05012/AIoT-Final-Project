@@ -14,7 +14,7 @@
 
 ### New Capabilities
 - `hydration-tracking`: 透過智慧杯墊與測重模組（Load Cell）持續追蹤水杯重量變化，判定有效飲水行為並記錄飲水量。
-- `posture-monitoring`: 透過超音波感測器偵測螢幕距離，監測使用者是否距離螢幕太近，並在距離過近或久坐時觸發警示。
+- `posture-and-sedentary-monitoring`: 透過超音波感測器偵測螢幕距離，除了監測距離是否過近（駝背），亦藉由使用者與螢幕之距離變化自動累計久坐時間（距離 $\le 70\text{ cm}$ 視為坐下，每 10 秒增加 1 分鐘），並在起立走動（距離 $> 70\text{ cm}$ 持續 10 秒）時自動歸零重設久坐時間。
 - `air-quality-monitoring`: 透過 GP2Y1010AU0F 粉塵感測器持續監測室內 PM2.5/懸浮微粒濃度，並在超標時發送環境惡化訊號。
 - `buzzer-alarm-feedback`: 透過無源蜂鳴器模組實作多重健康警告聲響警報。當警告數量增加時，動態提升鳴叫頻率（更急促）與音頻音高（更尖銳），提供具備環境感知與緊迫度分級的聲音回饋。
 - `iot-communication`: 負責微控制器（ESP32/Arduino）與桌面電腦間透過 MQTT/WebSocket 進行 JSON 格式數據的低延遲推播，並評估導入模型上下文協定（MCP）。
