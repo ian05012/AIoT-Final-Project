@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>WS Test</title>
+<style>body{font-family:monospace;font-size:20px;padding:30px;background:#111;color:#eee;}
+#status{font-size:32px;font-weight:bold;margin:20px 0;padding:15px;border-radius:8px;}
+.ok{background:#1a4a1a;color:#4ade80;}
+.fail{background:#4a1a1a;color:#f87171;}
+.wait{background:#2a2a1a;color:#fbbf24;}
+pre{background:#222;padding:10px;border-radius:4px;font-size:13px;overflow:auto;max-height:300px;}
+</style>
+</head>
+<body>
+<h2>WebSocket Connection Test</h2>
+<div id="status" class="wait">⏳ 測試中...</div>
+<pre id="log"></pre>
+<button onclick="tryConnect()" style="font-size:18px;padding:10px 20px;margin-top:10px;cursor:pointer;">重試</button>
+
+<script>
+const log = document.getElementById("log");
+const status = document.getElementById("status");
+function addLog(msg) {
+    log.textContent += new Date().toISOString().slice(11,19) + " " + msg + "\n";
+    log.scrollTop = log.scrollHeight;
+}
+
+function tryConnect() {
+    const urls = ["ws://127.0.0.1:3000", "ws://localhost:3000", "ws://[::1]:3000"];
+    status.className = "wait";
+    status.textContent = "⏳ 嘗試連線...";
+    log.textContent = "";
+    let idx = 0;
+
+    function next() {
+        if (idx >= urls.length) {
+            status.className = "fail";
+            status.textContent = "❌ 全部網址都連不上";
+            return;
+        }
+        const url = urls[idx++];
+        addLog("嘗試: " + url);
+        try {
+            const ws = new WebSocket(url);
+            ws.onopen = () => {
+                addLog("✅ 成功連上: " + url);
+                status.className = "ok";
+                status.textContent = "✅ 連線成功: " + url;
+                ws.close();
+            };
+            ws.onerror = () => { addLog("❌ 連線失敗: " + url); setTimeout(next, 300); };
+            ws.onclose = (e) => { if (e.code !== 1000) addLog("連線關閉 code=" + e.code); };
+        } catch(e) {
+            addLog("JS 例外: " + e.message);
+            next();
+        }
+    }
+    next();
+}
+
+tryConnect();
+</script>
+</body>
+</html>

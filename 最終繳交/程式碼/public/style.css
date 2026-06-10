@@ -1,0 +1,635 @@
+/* 全域設定與變數 */
+:root {
+    --bg-main: #121212;
+    --bg-panel: #1e1e1e;
+    --bg-control: #252525;
+    
+    --color-text: #f0f0f0;
+    --color-text-dim: #a0a0a0;
+    
+    /* Minecraft 配色 */
+    --color-dirt: #573d26;
+    --color-grass: #5c8e32;
+    --color-redstone: #e31e24;
+    --color-redstone-glow: rgba(227, 30, 36, 0.4);
+    --color-water: #4783eb;
+    --color-water-glow: rgba(71, 131, 235, 0.4);
+    --color-emerald: #17dd62;
+    --color-emerald-glow: rgba(23, 221, 98, 0.4);
+    --color-gold: #fdb813;
+    
+    --border-pixel-width: 4px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-main);
+    color: var(--color-text);
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 20px;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* 像素風字體只應用在特定元素 */
+.logo-area h1, .section-title, .status-text, .pixel-btn, .value-badge, .metric-val, .creeper-text {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.8rem;
+}
+
+/* 應用程式容器 */
+.app-container {
+    max-width: 1200px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Header */
+.app-header {
+    background-color: var(--bg-panel);
+    border: var(--border-pixel-width) solid #3c3c3c;
+    box-shadow: inset -4px -4px #000, inset 4px 4px #5a5a5a;
+    padding: 15px 25px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.logo-area {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.logo-area h1 {
+    font-size: 1.2rem;
+    color: var(--color-text);
+    text-shadow: 2px 2px #000;
+}
+
+.sub-title {
+    font-size: 0.85rem;
+    color: var(--color-text-dim);
+    margin-left: 10px;
+}
+
+.pixel-icon {
+    font-size: 1.8rem;
+    animation: bounce 2s infinite ease-in-out;
+}
+
+/* 連線狀態 */
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: #000;
+    padding: 8px 12px;
+    border: 2px solid #3c3c3c;
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.status-dot.connected {
+    background-color: var(--color-emerald);
+    box-shadow: 0 0 8px var(--color-emerald-glow);
+}
+
+.status-dot.disconnected {
+    background-color: var(--color-redstone);
+    box-shadow: 0 0 8px var(--color-redstone-glow);
+}
+
+.status-text {
+    font-size: 0.6rem;
+}
+
+/* 主要內容區 */
+.app-content {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 20px;
+}
+
+@media (max-width: 900px) {
+    .app-content {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 面板基底 */
+.panel {
+    background-color: var(--bg-panel);
+    border: var(--border-pixel-width) solid #3c3c3c;
+    box-shadow: inset -4px -4px #000, inset 4px 4px #5a5a5a, 0 10px 25px rgba(0,0,0,0.5);
+    padding: 25px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.section-title {
+    font-size: 0.9rem;
+    color: #fff;
+    text-shadow: 2px 2px #000;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 2px solid #3c3c3c;
+    padding-bottom: 10px;
+}
+
+/* 方塊磚裝飾 */
+.brick {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    background-color: var(--color-dirt);
+    border: 2px solid #332211;
+    box-shadow: inset -2px -2px #221105, inset 2px 2px #775533;
+}
+
+.brick.redstone {
+    background-color: var(--color-redstone);
+    border: 2px solid #660000;
+    box-shadow: inset -2px -2px #440000, inset 2px 2px #ff4444, 0 0 8px var(--color-redstone-glow);
+    animation: blink 1.5s infinite alternate;
+}
+
+/* 控制群組 */
+.control-group {
+    background-color: var(--bg-control);
+    border: 2px solid #2d2d2d;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    transition: all 0.2s ease;
+}
+
+.control-group:hover {
+    border-color: #4c4c4c;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+}
+
+.group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.group-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.value-badge {
+    background-color: #000;
+    padding: 4px 8px;
+    border: 2px solid #3c3c3c;
+    font-size: 0.65rem;
+    color: var(--color-gold);
+}
+
+/* 滑桿與控制項 */
+.range-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    background: transparent;
+}
+
+input[type=range]:focus {
+    outline: none;
+}
+
+input[type=range]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 12px;
+    cursor: pointer;
+    background: #0f0f0f;
+    border: 2px solid #3c3c3c;
+    box-shadow: inset 1px 1px 4px rgba(0,0,0,0.8);
+}
+
+input[type=range]::-webkit-slider-thumb {
+    height: 20px;
+    width: 12px;
+    background: var(--color-gold);
+    border: 2px solid #000;
+    cursor: pointer;
+    -webkit-appearance: none;
+    margin-top: -6px;
+    box-shadow: 2px 2px 0px #000;
+}
+
+input[type=range]:active::-webkit-slider-thumb {
+    background: #ffffff;
+}
+
+/* 雙滑桿排版 */
+.slider-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+}
+
+@media (max-width: 600px) {
+    .slider-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.slider-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.slider-col label {
+    font-size: 0.9rem;
+    color: var(--color-text-dim);
+}
+
+.val-num {
+    color: var(--color-gold);
+    font-weight: 600;
+}
+
+.range-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--color-text-dim);
+    margin-top: 2px;
+}
+
+/* 按鈕樣式 (Minecraft 風格) */
+.btn-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.pixel-btn {
+    background-color: #7f7f7f;
+    color: #fff;
+    border: 3px solid #000;
+    box-shadow: inset -3px -3px #4c4c4c, inset 3px 3px #dbdbdb;
+    padding: 10px 15px;
+    cursor: pointer;
+    text-shadow: 2px 2px #000;
+    transition: all 0.1s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.pixel-btn:hover {
+    background-color: #8c8c8c;
+    box-shadow: inset -3px -3px #595959, inset 3px 3px #e8e8e8;
+}
+
+.pixel-btn:active {
+    box-shadow: inset 3px 3px #3a3a3a, inset -3px -3px #dbdbdb;
+    transform: translateY(2px);
+}
+
+.pixel-btn.secondary {
+    background-color: #555;
+    box-shadow: inset -3px -3px #333, inset 3px 3px #777;
+}
+
+.pixel-btn.secondary:hover {
+    background-color: #666;
+}
+
+.pixel-btn.alert-trigger-btn {
+    background-color: #b56215;
+    box-shadow: inset -3px -3px #703c0c, inset 3px 3px #ea8a33;
+}
+.pixel-btn.alert-trigger-btn:hover {
+    background-color: #c76f1b;
+}
+
+.pixel-btn.warning-trigger-btn {
+    background-color: #cda817;
+    box-shadow: inset -3px -3px #846c0d, inset 3px 3px #fad63f;
+}
+.pixel-btn.warning-trigger-btn:hover {
+    background-color: #ddb81d;
+}
+
+.pixel-btn.danger-trigger-btn {
+    background-color: var(--color-redstone);
+    box-shadow: inset -3px -3px #990000, inset 3px 3px #ff6666;
+}
+.pixel-btn.danger-trigger-btn:hover {
+    background-color: #ef2e34;
+}
+
+.pixel-btn.tiny {
+    padding: 4px 8px;
+    font-size: 0.55rem;
+    border-width: 2px;
+    box-shadow: inset -2px -2px #333, inset 2px 2px #777;
+}
+
+/* 畫布區域 */
+.canvas-container {
+    position: relative;
+    width: 100%;
+    background-color: #101015;
+    border: var(--border-pixel-width) solid #3c3c3c;
+    box-shadow: inset 0 0 25px rgba(0,0,0,0.8), 0 4px 10px rgba(0,0,0,0.4);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    aspect-ratio: 1;
+}
+
+#steve-canvas {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* 苦力怕警告 overlay */
+.creeper-warning-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: rgba(92, 142, 50, 0.9);
+    border-top: 4px solid #000;
+    padding: 12px;
+    text-align: center;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+    z-index: 10;
+}
+
+.creeper-warning-overlay.show {
+    transform: translateY(0);
+}
+
+.creeper-text {
+    color: #fff;
+    text-shadow: 2px 2px #000;
+    font-size: 0.6rem;
+    line-height: 1.5;
+}
+
+/* 毒氣特效 overlay */
+.air-poison-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    background-color: rgba(92, 221, 50, 0);
+    transition: background-color 0.5s ease;
+    z-index: 5;
+}
+
+/* 遊戲化面板 */
+.dashboard {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.stat-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text-dim);
+}
+
+.hearts-container {
+    display: flex;
+    gap: 4px;
+}
+
+/* 心型圖案 */
+.heart {
+    font-size: 1.5rem;
+    filter: drop-shadow(1px 1px 0px #000);
+    animation: pulse 1s infinite alternate;
+}
+
+.heart.empty {
+    filter: drop-shadow(1px 1px 0px #000) grayscale(100%) opacity(0.3);
+}
+
+/* 健康指標卡片 */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+@media (max-width: 600px) {
+    .metrics-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.metric-card {
+    background-color: var(--bg-control);
+    border: 2px solid #2d2d2d;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: all 0.2s ease;
+}
+
+.metric-icon {
+    font-size: 2rem;
+    background-color: rgba(0,0,0,0.3);
+    padding: 8px;
+    border: 2px solid #3c3c3c;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 4px;
+}
+
+.metric-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.metric-title {
+    font-size: 0.8rem;
+    color: var(--color-text-dim);
+}
+
+.metric-val {
+    font-size: 0.6rem;
+    color: #fff;
+}
+
+/* 狀態特定的卡片高亮 */
+.metric-card.alert {
+    border-color: var(--color-redstone);
+    box-shadow: 0 0 10px var(--color-redstone-glow);
+}
+
+.metric-card.good {
+    border-color: var(--color-emerald);
+}
+
+/* 控制台日誌 */
+.console-panel {
+    background-color: #0c0c0f;
+    border: var(--border-pixel-width) solid #222;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.console-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.console-header h4 {
+    font-size: 0.9rem;
+    color: var(--color-text-dim);
+}
+
+.console-body {
+    height: 100px;
+    overflow-y: auto;
+    background-color: #050508;
+    border: 2px solid #1a1a1a;
+    padding: 8px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.8rem;
+    color: #00ff00;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.console-line {
+    margin-bottom: 4px;
+    border-left: 3px solid #005500;
+    padding-left: 8px;
+}
+
+.console-line.inbound {
+    border-color: #00aaff;
+    color: #9cdcfe;
+}
+
+.console-line.outbound {
+    border-color: #00ff66;
+    color: #4ec9b0;
+}
+
+/* 動畫效果 */
+@keyframes bounce {
+    0%, 100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-5px);
+    }
+}
+
+@keyframes blink {
+    0% {
+        box-shadow: inset -2px -2px #440000, inset 2px 2px #ff4444, 0 0 2px var(--color-redstone-glow);
+    }
+    100% {
+        box-shadow: inset -2px -2px #440000, inset 2px 2px #ff4444, 0 0 12px var(--color-redstone-glow);
+    }
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+    }
+    100% {
+        transform: scale(1.08);
+    }
+}
+
+/* 角色選擇器樣式 */
+.pet-selector-wrapper {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 0 5px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.selector-label {
+    font-size: 0.65rem;
+    font-weight: 800;
+    color: var(--color-text-dim);
+    font-family: 'Press Start 2P', monospace;
+    letter-spacing: -0.5px;
+}
+
+.pet-selector {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.pet-selector .pixel-btn {
+    padding: 5px 8px;
+    font-size: 0.65rem;
+    background-color: #555;
+    box-shadow: inset -2px -2px #333, inset 2px 2px #777;
+    border-width: 2px;
+}
+
+.pet-selector .pixel-btn:hover {
+    background-color: #666;
+}
+
+.pet-selector .pixel-btn.active {
+    background-color: var(--color-emerald) !important;
+    border-color: #000 !important;
+    color: #121212 !important;
+    text-shadow: none;
+    box-shadow: inset -2px -2px #0a7331, inset 2px 2px #5cff9c;
+}
+
